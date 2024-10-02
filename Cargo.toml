@@ -1,0 +1,11 @@
+[package]
+name = "gh-ec-audit"
+description = "Because GitHub just doesn't provide the APIs you need to audit External Collaborators."
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+colored = "2.0.0"
+reqwest = { version = "0.11.6", features = ["blocking", "json"] }
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.68"
