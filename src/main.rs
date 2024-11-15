@@ -1,4 +1,10 @@
-use std::{collections::HashSet, thread::sleep, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    path::Path,
+    thread::sleep,
+    time::Duration,
+};
 
 use colored::Colorize;
 
@@ -44,7 +50,7 @@ struct GitHubError {
     pub status: String,
 }
 
-impl std::fmt::Display for GitHubError {
+impl Display for GitHubError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -53,6 +59,37 @@ impl std::fmt::Display for GitHubError {
         )
     }
 }
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Hash, Eq, PartialEq)]
+struct ExternalCollaboratorPermission {
+    #[serde(rename = "GitHub User")]
+    login: String,
+    #[serde(rename = "Repo")]
+    repository: String,
+    #[serde(rename = "Access")]
+    access: String,
+    #[serde(rename = "Status")]
+    status: Option<String>,
+    #[serde(rename = "JIRA Ticket")]
+    ticket: Option<String>,
+    #[serde(rename = "Quorum Proposal")]
+    proposal: Option<String>,
+}
+
+impl ExternalCollaboratorPermission {
+    fn new(login: String, repository: String, access: String) -> Self {
+        Self {
+            login,
+            repository,
+            access,
+            status: None,
+            ticket: None,
+            proposal: None,
+        }
+    }
+}
+
+type ExternalCollaboratorPermissions = HashMap<(String, String), ExternalCollaboratorPermission>;
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
 struct Collaborator {
@@ -190,6 +227,30 @@ where
     Ok(all_items)
 }
 
+fn parse_previous_run_csv(file: impl AsRef<Path>) -> ExternalCollaboratorPermissions {
+    let mut reader = csv::Reader::from_path(file).unwrap();
+    reader
+        .deserialize()
+        .into_iter()
+        .filter_map(|x: Result<ExternalCollaboratorPermission, _>| {
+            if let Ok(x) = x {
+                Some(((x.login.clone(), x.repository.clone()), x))
+            } else {
+                println!("{}: {:?}", "Couldn't parse a row".red(), x);
+                None
+            }
+        })
+        .collect()
+}
+
+fn generate_csv(ec_permissions: ExternalCollaboratorPermissions) -> String {
+    let mut writer = csv::Writer::from_writer(vec![]);
+    for (_, permission) in ec_permissions {
+        writer.serialize(permission).unwrap();
+    }
+    String::from_utf8(writer.into_inner().unwrap()).unwrap()
+}
+
 fn main() {
     println!("{}", "GitHub EC Audit".white().bold());
     println!(
@@ -217,6 +278,35 @@ fn main() {
     };
 
     println!("{} {}", "I have organization:".green(), gh_org.white());
+
+    let previous_ec_permissions = match std::env::args().len() {
+        1 => {
+            println!(
+                "{}",
+                "I don't see any arguments, I'm going to assume this is the first run.".yellow()
+            );
+            ExternalCollaboratorPermissions::new()
+        }
+        2 => {
+            println!(
+                "{}",
+                "I see an argument, I'm going to assume that's a CSV with the output from a previous run.".yellow()
+            );
+            parse_previous_run_csv(std::env::args().nth(1).unwrap())
+        }
+        _ => {
+            panic!(
+                "{}",
+                "I see too many arguments, I'm going to assume that's a mistake.".red()
+            );
+        }
+    };
+
+    println!(
+        "{} {}",
+        "I've got this many people from previous runs:".green(),
+        previous_ec_permissions.len()
+    );
 
     println!(
         "{}",
@@ -274,6 +364,8 @@ fn main() {
     let mut progress = 0;
     let mut never_seen_outside_collaborators = outside_collaborators.clone();
 
+    let mut ec_permissions = ExternalCollaboratorPermissions::new();
+
     for repository in repositories {
         let collaborators: HashSet<Collaborator> = match make_paginated_github_request(
             &gh_token,
@@ -295,12 +387,44 @@ fn main() {
             if outside_collaborators.contains(&OutsideCollaborator {
                 login: collaborator.login.clone(),
             }) {
-                println!(
-                    "EC: {} {}: {}",
-                    collaborator.login.white(),
-                    repository.name.white(),
-                    collaborator.permissions.highest_perm().red(),
-                );
+                match previous_ec_permissions
+                    .get(&(collaborator.login.clone(), repository.name.clone()))
+                {
+                    Some(ec_perm) => {
+                        if ec_perm.access != collaborator.permissions.highest_perm() {
+                            println!(
+                                "{}: {} {} {}",
+                                "I found a change in access so clearing approvals for".yellow(),
+                                collaborator.login.white(),
+                                "in".yellow(),
+                                repository.name.white(),
+                            );
+                            ec_permissions.insert(
+                                (collaborator.login.clone(), repository.name.clone()),
+                                ExternalCollaboratorPermission::new(
+                                    collaborator.login.clone(),
+                                    repository.name.clone(),
+                                    collaborator.permissions.highest_perm(),
+                                ),
+                            );
+                        } else {
+                            ec_permissions.insert(
+                                (collaborator.login.clone(), repository.name.clone()),
+                                ec_perm.clone(),
+                            );
+                        }
+                    }
+                    None => {
+                        ec_permissions.insert(
+                            (collaborator.login.clone(), repository.name.clone()),
+                            ExternalCollaboratorPermission::new(
+                                collaborator.login.clone(),
+                                repository.name.clone(),
+                                collaborator.permissions.highest_perm(),
+                            ),
+                        );
+                    }
+                };
                 never_seen_outside_collaborators.remove(&OutsideCollaborator {
                     login: collaborator.login.clone(),
                 });
@@ -313,8 +437,17 @@ fn main() {
     }
 
     println!(
+        "{}: {} different access permissions",
+        "I'm done and I found:".green(),
+        ec_permissions.len()
+    );
+
+    println!(
         "{} {:?}",
         "These external collaborators have no access to any repository weirdly enough".yellow(),
         never_seen_outside_collaborators
     );
+
+    println!("{}", "Here's your updated CSV".green());
+    println!("{}", generate_csv(ec_permissions));
 }
