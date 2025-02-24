@@ -23,7 +23,7 @@ struct Member {
     login: String,
 }
 
-pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
+pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>) {
     println!("{}", "GitHub Deploy Key Audit".white().bold());
 
     println!("{}", "Fetching all organization members".yellow());

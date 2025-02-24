@@ -4,6 +4,7 @@ use colored::Colorize;
 
 pub mod deploy_key;
 pub mod external_collaborator;
+pub mod members;
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
 struct Permissions {

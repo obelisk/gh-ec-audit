@@ -3,6 +3,7 @@ use gh_ec_audit::deploy_key;
 use gh_ec_audit::external_collaborator;
 
 use clap::{command, Parser};
+use gh_ec_audit::members;
 use gh_ec_audit::Bootstrap;
 
 /// Simple program to greet a person
@@ -16,6 +17,10 @@ struct Args {
     /// Run the deploy key audit
     #[arg(short, long)]
     dk: bool,
+
+    /// Run the members audit
+    #[arg(short, long)]
+    mem: bool,
 
     /// The previous run CSV file
     #[arg(short, long)]
@@ -37,6 +42,8 @@ fn main() {
         external_collaborator::run_audit(bootstrap, args.previous);
     } else if args.dk {
         deploy_key::run_audit(bootstrap, args.previous);
+    } else if args.mem {
+        members::run_audit(bootstrap);
     } else {
         println!("No command specified");
     }
