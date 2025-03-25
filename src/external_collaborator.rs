@@ -5,7 +5,7 @@ use std::{
 
 use colored::Colorize;
 
-use crate::{make_paginated_github_request, Bootstrap, Permissions, Repository};
+use crate::{make_paginated_github_request, Bootstrap, Collaborator, Repository};
 
 pub type ExternalCollaboratorPermissions =
     HashMap<(String, String), ExternalCollaboratorPermission>;
@@ -42,12 +42,6 @@ impl ExternalCollaboratorPermission {
             proposal: None,
         }
     }
-}
-
-#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-pub struct Collaborator {
-    login: String,
-    permissions: Permissions,
 }
 
 fn parse_previous_run_csv(file: impl AsRef<Path>) -> ExternalCollaboratorPermissions {
@@ -112,6 +106,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         100,
         &format!("/orgs/{}/outside_collaborators", &bootstrap.org),
         3,
+        None,
     ) {
         Ok(outside_collaborators) => outside_collaborators,
         Err(e) => {
@@ -152,6 +147,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
                 &bootstrap.org, repository.name
             ),
             3,
+            None,
         ) {
             Ok(collaborators) => collaborators,
             Err(e) => {

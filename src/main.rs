@@ -22,6 +22,14 @@ struct Args {
     #[arg(short, long)]
     mem: bool,
 
+    /// Run the admin audit
+    #[arg(short, long)]
+    admin: bool,
+
+    /// Limit the scanning to the given repos
+    #[clap(short, long, value_delimiter = ',', num_args = 1..)]
+    repos: Option<Vec<String>>,
+
     /// The previous run CSV file
     #[arg(short, long)]
     previous: Option<String>,
@@ -44,6 +52,8 @@ fn main() {
         deploy_key::run_audit(bootstrap, args.previous);
     } else if args.mem {
         members::run_audit(bootstrap);
+    } else if args.admin {
+        members::run_admin_audit(bootstrap, args.repos);
     } else {
         println!("No command specified");
     }

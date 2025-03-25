@@ -15,6 +15,12 @@ struct Permissions {
     admin: bool,
 }
 
+#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
+pub struct Collaborator {
+    login: String,
+    permissions: Permissions,
+}
+
 impl Permissions {
     fn highest_perm(&self) -> String {
         if self.admin {
@@ -71,10 +77,16 @@ fn make_paginated_github_request<T>(
     page_size: u8,
     url: &str,
     retries: u8,
+    params: Option<&str>,
 ) -> Result<HashSet<T>, String>
 where
     T: serde::de::DeserializeOwned + std::hash::Hash + std::cmp::Eq,
 {
+    let params = match params {
+        Some(params) => format!("&{params}"),
+        None => String::new(),
+    };
+
     let mut page = 1;
     let mut all_items = HashSet::new();
     let mut tries = 0;
@@ -82,8 +94,7 @@ where
         tries += 1;
         let response = reqwest::blocking::Client::new()
             .get(&format!(
-                "https://api.github.com{}?per_page={page_size}&page={}",
-                url, page
+                "https://api.github.com{url}?per_page={page_size}&page={page}{params}",
             ))
             .header("User-Agent", "GitHub EC Audit")
             .header("Accept", "application/vnd.github+json")
@@ -225,6 +236,7 @@ impl Bootstrap {
             page_size,
             &format!("/orgs/{}/repos", &self.org),
             3,
+            None,
         ) {
             Ok(repositories) => repositories,
             Err(e) => {
