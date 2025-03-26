@@ -1,10 +1,19 @@
-use std::{collections::HashSet, fmt::Display, thread::sleep, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    thread::sleep,
+    time::Duration,
+};
 
 use colored::Colorize;
 
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
+
+pub trait GitHubIndex {
+    fn index(&self) -> String;
+}
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
 struct Permissions {
@@ -19,6 +28,18 @@ struct Permissions {
 pub struct Collaborator {
     login: String,
     permissions: Permissions,
+}
+
+#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
+struct Member {
+    avatar_url: String,
+    login: String,
+}
+
+impl GitHubIndex for Member {
+    fn index(&self) -> String {
+        self.login.clone()
+    }
 }
 
 impl Permissions {
@@ -192,6 +213,25 @@ where
     }
 
     Ok(all_items)
+}
+
+fn make_paginated_github_request_with_index<T>(
+    gh_token: &str,
+    page_size: u8,
+    url: &str,
+    retries: u8,
+    params: Option<&str>,
+) -> Result<HashMap<String, T>, String>
+where
+    T: serde::de::DeserializeOwned + std::hash::Hash + std::cmp::Eq + GitHubIndex,
+{
+    let results: HashSet<T> =
+        make_paginated_github_request(gh_token, page_size, url, retries, params)?;
+
+    Ok(results
+        .into_iter()
+        .map(|item| (item.index(), item))
+        .collect::<HashMap<String, T>>())
 }
 
 pub struct Bootstrap {

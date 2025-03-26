@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use colored::Colorize;
 
-use crate::{make_paginated_github_request, Bootstrap, Repository};
+use crate::{
+    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap, Member,
+    Repository,
+};
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
 struct DeployKey {
@@ -18,16 +21,11 @@ struct DeployKey {
     enabled: bool,
 }
 
-#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-struct Member {
-    login: String,
-}
-
 pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>) {
     println!("{}", "GitHub Deploy Key Audit".white().bold());
 
     println!("{}", "Fetching all organization members".yellow());
-    let members: HashSet<Member> = match make_paginated_github_request(
+    let members: HashMap<String, Member> = match make_paginated_github_request_with_index(
         &bootstrap.token,
         75,
         &format!("/orgs/{}/members", &bootstrap.org),
@@ -72,9 +70,7 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>) {
         };
 
         for deploy_key in deploy_keys {
-            if !members.contains(&Member {
-                login: deploy_key.added_by.clone(),
-            }) {
+            if !members.contains_key(&deploy_key.added_by) {
                 println!(
                     "{} has deploy key {} {}: {}",
                     repository.name.white(),

@@ -5,7 +5,10 @@ use std::{
 
 use colored::Colorize;
 
-use crate::{make_paginated_github_request, Bootstrap, Collaborator, Repository};
+use crate::{
+    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap,
+    Collaborator, GitHubIndex, Repository,
+};
 
 pub type ExternalCollaboratorPermissions =
     HashMap<(String, String), ExternalCollaboratorPermission>;
@@ -13,6 +16,12 @@ pub type ExternalCollaboratorPermissions =
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq, Clone)]
 pub struct OutsideCollaborator {
     login: String,
+}
+
+impl GitHubIndex for OutsideCollaborator {
+    fn index(&self) -> String {
+        self.login.clone()
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, Hash, Eq, PartialEq)]
@@ -101,21 +110,22 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         "I'm going to fetch all external collaborators from the org".yellow(),
     );
 
-    let outside_collaborators: HashSet<OutsideCollaborator> = match make_paginated_github_request(
-        &bootstrap.token,
-        100,
-        &format!("/orgs/{}/outside_collaborators", &bootstrap.org),
-        3,
-        None,
-    ) {
-        Ok(outside_collaborators) => outside_collaborators,
-        Err(e) => {
-            panic!(
-                "{}: {e}",
-                "I couldn't fetch the outside collaborators".red()
-            );
-        }
-    };
+    let outside_collaborators: HashMap<String, OutsideCollaborator> =
+        match make_paginated_github_request_with_index(
+            &bootstrap.token,
+            100,
+            &format!("/orgs/{}/outside_collaborators", &bootstrap.org),
+            3,
+            None,
+        ) {
+            Ok(outside_collaborators) => outside_collaborators,
+            Err(e) => {
+                panic!(
+                    "{}: {e}",
+                    "I couldn't fetch the outside collaborators".red()
+                );
+            }
+        };
 
     println!(
         "{} {}",
@@ -160,9 +170,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         };
 
         for collaborator in collaborators {
-            if outside_collaborators.contains(&OutsideCollaborator {
-                login: collaborator.login.clone(),
-            }) {
+            if outside_collaborators.contains_key(&collaborator.login) {
                 match previous_ec_permissions
                     .get(&(collaborator.login.clone(), repository.name.clone()))
                 {
@@ -201,9 +209,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
                         );
                     }
                 };
-                never_seen_outside_collaborators.remove(&OutsideCollaborator {
-                    login: collaborator.login.clone(),
-                });
+                never_seen_outside_collaborators.remove(&collaborator.login);
             }
         }
         progress += 1;
