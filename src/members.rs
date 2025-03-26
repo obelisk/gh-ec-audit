@@ -40,7 +40,6 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             &format!("/orgs/{}/members", &bootstrap.org),
             3,
             Some("role=admin"),
-            |member: &Member| member.login.clone(),
         ) {
             Ok(org_admins) => org_admins,
             Err(e) => {
@@ -107,7 +106,6 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
                         &format!("/orgs/{}/teams/{}/members", &bootstrap.org, team.slug),
                         3,
                         None,
-                        |member: &Member| member.login.clone(),
                     ) {
                         Ok(t) => t,
                         Err(e) => {

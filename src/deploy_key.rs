@@ -31,7 +31,6 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>) {
         &format!("/orgs/{}/members", &bootstrap.org),
         3,
         None,
-        |member: &Member| member.login.clone(),
     ) {
         Ok(members) => members,
         Err(e) => {
