@@ -1,4 +1,9 @@
-use std::{collections::HashSet, fmt::Display, thread::sleep, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    thread::sleep,
+    time::Duration,
+};
 
 use colored::Colorize;
 
@@ -19,6 +24,18 @@ struct Permissions {
 pub struct Collaborator {
     login: String,
     permissions: Permissions,
+}
+
+#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
+struct Member {
+    avatar_url: String,
+    login: String,
+}
+
+impl Member {
+    fn index(&self) -> String {
+        self.login.clone()
+    }
 }
 
 impl Permissions {
@@ -148,6 +165,132 @@ where
                 page += 1;
                 tries = 0;
                 all_items.extend(data);
+            }
+            Ok(GitHubResponse::Error(e)) => {
+                // GitHub threw an error and if it's a ratelimit we can wait and retry
+                if e.message.contains("API rate limit exceeded") {
+                    sleep(Duration::from_secs(60));
+                } else {
+                    // This doesn't look like the expected data or a ratelimit error
+
+                    // We're out of retries so we need to stop
+                    if tries >= retries {
+                        println!("{}", "Retries exhausted".red());
+                        return Err(e.to_string());
+                    }
+
+                    // We have retries remaining so we'll try again
+                    println!(
+                        "{}: {}",
+                        "Going to retry because couldn't deserialize response from GitHub:"
+                            .yellow(),
+                        e.to_string().red()
+                    );
+                    tries += 1;
+                    println!("{}", content.yellow());
+                }
+            }
+            Err(e) => {
+                // This doesn't look like the expected data or an error
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't deserialize response from GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                println!("{}", content.yellow());
+            }
+        }
+    }
+
+    Ok(all_items)
+}
+
+fn make_paginated_github_request_with_index<T>(
+    gh_token: &str,
+    page_size: u8,
+    url: &str,
+    retries: u8,
+    params: Option<&str>,
+    indexer: impl Fn(&T) -> String,
+) -> Result<HashMap<String, T>, String>
+where
+    T: serde::de::DeserializeOwned + std::hash::Hash + std::cmp::Eq,
+{
+    let params = match params {
+        Some(params) => format!("&{params}"),
+        None => String::new(),
+    };
+
+    let mut page = 1;
+    let mut all_items = HashMap::new();
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        let response = reqwest::blocking::Client::new()
+            .get(&format!(
+                "https://api.github.com{url}?per_page={page_size}&page={page}{params}",
+            ))
+            .header("User-Agent", "GitHub EC Audit")
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("Authorization", format!("Bearer {}", gh_token))
+            .send()
+            .map(|response| response.text());
+
+        // Handle communication issues with GitHub
+        let content = match response {
+            Ok(Ok(content)) => content,
+            Ok(Err(e)) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't read response from GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+            Err(e) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't make request to GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+        };
+
+        // Handle GitHub errors
+        match serde_json::from_str::<GitHubResponse<T>>(content.as_str()) {
+            Ok(GitHubResponse::Data(data)) => {
+                // When we go past the end (an unneeded page), we'll get an empty response so we can break
+                if data.is_empty() {
+                    break;
+                }
+
+                // The page is full so we need to add all these users to our set and grab the next page
+                page += 1;
+                tries = 0;
+
+                for item in data {
+                    all_items.insert(indexer(&item), item);
+                }
             }
             Ok(GitHubResponse::Error(e)) => {
                 // GitHub threw an error and if it's a ratelimit we can wait and retry
