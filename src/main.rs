@@ -4,6 +4,7 @@ use gh_ec_audit::external_collaborator;
 
 use clap::{command, Parser};
 use gh_ec_audit::members;
+use gh_ec_audit::teams;
 use gh_ec_audit::Bootstrap;
 
 /// Simple program to greet a person
@@ -11,27 +12,39 @@ use gh_ec_audit::Bootstrap;
 #[command(version, about, long_about = None)]
 struct Args {
     /// Run the external collaborator audit
-    #[arg(short, long)]
+    #[arg(long)]
     ec: bool,
 
     /// Run the deploy key audit
-    #[arg(short, long)]
+    #[arg(long)]
     dk: bool,
 
     /// Run the members audit
-    #[arg(short, long)]
+    #[arg(long)]
     mem: bool,
 
     /// Run the admin audit
-    #[arg(short, long)]
+    #[arg(long)]
     admin: bool,
 
+    /// Run the team maintainer audit
+    #[arg(long)]
+    tm: bool,
+
     /// Limit the scanning to the given repos
-    #[clap(short, long, value_delimiter = ',', num_args = 1..)]
+    #[clap(long, value_delimiter = ',', num_args = 1..)]
     repos: Option<Vec<String>>,
 
+    /// Limit the scanning to the given repos
+    #[clap(long, value_delimiter = ',', num_args = 1..)]
+    teams: Option<Vec<String>>,
+
+    /// Only evaluate public repositories
+    #[arg(long)]
+    public: bool,
+
     /// The previous run CSV file
-    #[arg(short, long)]
+    #[arg(long)]
     previous: Option<String>,
 }
 
@@ -53,7 +66,9 @@ fn main() {
     } else if args.mem {
         members::run_audit(bootstrap);
     } else if args.admin {
-        members::run_admin_audit(bootstrap, args.repos);
+        members::run_admin_audit(bootstrap, args.repos, args.public);
+    } else if args.tm {
+        teams::run_maintainer_audit(bootstrap, args.teams);
     } else {
         println!("No command specified");
     }

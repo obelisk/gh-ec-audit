@@ -10,6 +10,7 @@ use colored::Colorize;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
+pub mod teams;
 
 pub trait GitHubIndex {
     fn index(&self) -> String;
@@ -42,6 +43,22 @@ impl GitHubIndex for Member {
     }
 }
 
+// Represents a team
+#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
+pub struct Team {
+    name: String,
+    slug: String,
+    description: String,
+    #[serde(default = "Permissions::none")]
+    permissions: Permissions,
+}
+
+impl GitHubIndex for Team {
+    fn index(&self) -> String {
+        self.slug.clone()
+    }
+}
+
 impl Permissions {
     fn highest_perm(&self) -> String {
         if self.admin {
@@ -60,6 +77,16 @@ impl Permissions {
             return "pull".to_string();
         }
         "none".to_string()
+    }
+
+    fn none() -> Self {
+        Self {
+            pull: false,
+            triage: false,
+            push: false,
+            maintain: false,
+            admin: false,
+        }
     }
 }
 
@@ -84,6 +111,12 @@ impl Display for GitHubError {
 pub struct Repository {
     pub name: String,
     pub private: bool,
+}
+
+impl GitHubIndex for Repository {
+    fn index(&self) -> String {
+        self.name.clone()
+    }
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
@@ -265,33 +298,62 @@ impl Bootstrap {
         Ok(Self { token, org })
     }
 
-    pub fn fetch_all_repositories(&self, page_size: u8) -> Result<HashSet<Repository>, String> {
+    pub fn fetch_organization_admins(&self) -> Result<HashMap<String, Member>, String> {
+        println!("{}", "I'm going to fetch all organization admins".yellow());
+
+        let organization_admins: HashMap<String, Member> =
+            match make_paginated_github_request_with_index(
+                &self.token,
+                100,
+                &format!("/orgs/{}/members", &self.org),
+                3,
+                Some("role=admin"),
+            ) {
+                Ok(org_admins) => org_admins,
+                Err(e) => {
+                    panic!("{}: {e}", "I couldn't fetch the organization members".red());
+                }
+            };
+
+        println!(
+            "{} {}",
+            "Success! I found: ".green(),
+            organization_admins.len()
+        );
+        Ok(organization_admins)
+    }
+
+    pub fn fetch_all_repositories(
+        &self,
+        page_size: u8,
+    ) -> Result<HashMap<String, Repository>, String> {
         println!(
             "{}",
             "I'm going to fetch all repositories from the org".yellow()
         );
 
-        let repositories: HashSet<Repository> = match make_paginated_github_request(
-            &self.token,
-            page_size,
-            &format!("/orgs/{}/repos", &self.org),
-            3,
-            None,
-        ) {
-            Ok(repositories) => repositories,
-            Err(e) => {
-                return Err(format!(
-                    "{}: {}",
-                    "I couldn't fetch the repositories".red(),
-                    e
-                ));
-            }
-        };
+        let repositories: HashMap<String, Repository> =
+            match make_paginated_github_request_with_index(
+                &self.token,
+                page_size,
+                &format!("/orgs/{}/repos", &self.org),
+                3,
+                None,
+            ) {
+                Ok(repositories) => repositories,
+                Err(e) => {
+                    return Err(format!(
+                        "{}: {}",
+                        "I couldn't fetch the repositories".red(),
+                        e
+                    ));
+                }
+            };
 
         println!("{} {}", "Success! I found: ".green(), repositories.len());
         if !repositories
             .iter()
-            .fold(false, |acc, repo| acc || repo.private)
+            .fold(false, |acc, repo| acc || repo.1.private)
         {
             println!("{}", "I didn't find any private repositories. Make sure you have permission to read private repositories.".red());
         }

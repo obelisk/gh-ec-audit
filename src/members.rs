@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap,
-    Collaborator, Member, Permissions, Repository,
+    Collaborator, Member, Repository, Team,
 };
 
 pub fn run_audit(bootstrap: Bootstrap) {
@@ -26,37 +26,52 @@ pub fn run_audit(bootstrap: Bootstrap) {
     }
 }
 
-pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
-    #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-    struct Team {
-        slug: String,
-        permissions: Permissions,
+pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>, public: bool) {
+    let repos = repos.map(|r| {
+        r.into_iter()
+            .map(|x| x.to_lowercase())
+            .collect::<HashSet<String>>()
+    });
+
+    let organization_admins = bootstrap.fetch_organization_admins().unwrap();
+
+    let all_repositories: HashMap<_, _> = bootstrap
+        .fetch_all_repositories(75)
+        .unwrap()
+        .into_iter()
+        .filter(|r| if public { !r.1.private } else { true })
+        .collect();
+
+    let repositories: HashMap<String, Repository> = match &repos {
+        Some(repos) => all_repositories
+            .into_iter()
+            .filter(|r| repos.contains(&r.1.name))
+            .collect(),
+        None => all_repositories,
+    };
+
+    match &repos {
+        Some(repos) => {
+            for repo in repos {
+                if !repositories.contains_key(repo) {
+                    println!(
+                        "{} {} {}",
+                        "I couldn't find".red(),
+                        repo.white(),
+                        "in the organization".red()
+                    );
+                }
+            }
+        }
+        None => {}
     }
 
-    let organization_admins: HashMap<String, Member> =
-        match make_paginated_github_request_with_index(
-            &bootstrap.token,
-            100,
-            &format!("/orgs/{}/members", &bootstrap.org),
-            3,
-            Some("role=admin"),
-        ) {
-            Ok(org_admins) => org_admins,
-            Err(e) => {
-                panic!("{}: {e}", "I couldn't fetch the organization members".red());
-            }
-        };
-
-    let repositories: HashSet<Repository> = match repos {
-        Some(repos) => repos
-            .into_iter()
-            .map(|r| Repository {
-                name: r,
-                private: false,
-            })
-            .collect(),
-        None => bootstrap.fetch_all_repositories(75).unwrap(),
-    };
+    println!(
+        "{} {} {}",
+        "I'm going to check".green(),
+        repositories.len().to_string().white(),
+        "repositories".green()
+    );
 
     let mut team_cache: HashMap<String, HashMap<String, Member>> = HashMap::new();
 
@@ -68,7 +83,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
         let repo_teams: HashSet<Team> = match make_paginated_github_request(
             &bootstrap.token,
             25,
-            &format!("/repos/{}/{}/teams", &bootstrap.org, repository.name),
+            &format!("/repos/{}/{}/teams", &bootstrap.org, repository.1.name),
             3,
             None,
         ) {
@@ -76,7 +91,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             Err(e) => {
                 panic!(
                     "{} {}: {e}",
-                    repository.name.white(),
+                    repository.1.name.white(),
                     "I couldn't fetch the repository collaborators".red()
                 );
             }
@@ -93,7 +108,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
                 "I found an admin team:".yellow(),
                 repo_admin_team.slug.white(),
                 "on".yellow(),
-                repository.name.white()
+                repository.1.name.white()
             );
         }
 
@@ -111,7 +126,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
                         Err(e) => {
                             panic!(
                                 "{} {}: {e}",
-                                repository.name.white(),
+                                repository.1.name.white(),
                                 "I couldn't fetch the repository collaborators".red()
                             );
                         }
@@ -125,7 +140,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             25,
             &format!(
                 "/repos/{}/{}/collaborators",
-                &bootstrap.org, repository.name
+                &bootstrap.org, repository.1.name
             ),
             3,
             None,
@@ -134,7 +149,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             Err(e) => {
                 panic!(
                     "{} {}: {e}",
-                    repository.name.white(),
+                    repository.1.name.white(),
                     "I couldn't fetch the repository collaborators".red()
                 );
             }
@@ -157,7 +172,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
                     "I found an admin user:".yellow(),
                     collaborator.login.white(),
                     "on".yellow(),
-                    repository.name.white()
+                    repository.1.name.white()
                 );
             }
         }

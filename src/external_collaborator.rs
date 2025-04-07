@@ -7,7 +7,7 @@ use colored::Colorize;
 
 use crate::{
     make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap,
-    Collaborator, GitHubIndex, Repository,
+    Collaborator, GitHubIndex,
 };
 
 pub type ExternalCollaboratorPermissions =
@@ -138,7 +138,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         "Alright! Now I need to fetch all repositories so I can check for their access.".yellow()
     );
 
-    let repositories: HashSet<Repository> = bootstrap.fetch_all_repositories(75).unwrap();
+    let repositories = bootstrap.fetch_all_repositories(75).unwrap();
 
     println!("{}", "Finally the big one, I'm going to check each repository one by one to find external collaborators and their access. This is going to take a while...".yellow());
 
@@ -154,7 +154,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
             25,
             &format!(
                 "/repos/{}/{}/collaborators",
-                &bootstrap.org, repository.name
+                &bootstrap.org, repository.1.name
             ),
             3,
             None,
@@ -163,7 +163,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
             Err(e) => {
                 panic!(
                     "{} {}: {e}",
-                    repository.name.white(),
+                    repository.1.name.white(),
                     "I couldn't fetch the repository collaborators".red()
                 );
             }
@@ -172,7 +172,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         for collaborator in collaborators {
             if outside_collaborators.contains_key(&collaborator.login) {
                 match previous_ec_permissions
-                    .get(&(collaborator.login.clone(), repository.name.clone()))
+                    .get(&(collaborator.login.clone(), repository.1.name.clone()))
                 {
                     Some(ec_perm) => {
                         if ec_perm.access != collaborator.permissions.highest_perm() {
@@ -181,29 +181,29 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
                                 "I found a change in access so clearing approvals for".yellow(),
                                 collaborator.login.white(),
                                 "in".yellow(),
-                                repository.name.white(),
+                                repository.1.name.white(),
                             );
                             ec_permissions.insert(
-                                (collaborator.login.clone(), repository.name.clone()),
+                                (collaborator.login.clone(), repository.1.name.clone()),
                                 ExternalCollaboratorPermission::new(
                                     collaborator.login.clone(),
-                                    repository.name.clone(),
+                                    repository.1.name.clone(),
                                     collaborator.permissions.highest_perm(),
                                 ),
                             );
                         } else {
                             ec_permissions.insert(
-                                (collaborator.login.clone(), repository.name.clone()),
+                                (collaborator.login.clone(), repository.1.name.clone()),
                                 ec_perm.clone(),
                             );
                         }
                     }
                     None => {
                         ec_permissions.insert(
-                            (collaborator.login.clone(), repository.name.clone()),
+                            (collaborator.login.clone(), repository.1.name.clone()),
                             ExternalCollaboratorPermission::new(
                                 collaborator.login.clone(),
-                                repository.name.clone(),
+                                repository.1.name.clone(),
                                 collaborator.permissions.highest_perm(),
                             ),
                         );
