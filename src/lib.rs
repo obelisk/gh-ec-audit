@@ -7,6 +7,7 @@ use std::{
 
 use colored::Colorize;
 
+pub mod bpr;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
@@ -91,6 +92,70 @@ pub struct Repository {
 enum GitHubResponse<T> {
     Data(Vec<T>),
     Error(GitHubError),
+}
+
+fn make_github_request(
+    gh_token: &str,
+    url: &str,
+    retries: u8,
+    params: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let params = match params {
+        Some(params) => format!("?{params}"),
+        None => String::new(),
+    };
+
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        let response = reqwest::blocking::Client::new()
+            .get(&format!("https://api.github.com{url}{params}",))
+            .header("User-Agent", "GitHub EC Audit")
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("Authorization", format!("Bearer {}", gh_token))
+            .send()
+            .map(|response| response.text());
+
+        // Handle communication issues with GitHub
+        let content = match response {
+            Ok(Ok(content)) => content,
+            Ok(Err(e)) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't read response from GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+            Err(e) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't make request to GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+        };
+
+        let value = serde_json::from_str::<serde_json::Value>(&content)
+            .map_err(|e| format!("Could not deserialize GitHub's response. Error: {e}"))?;
+
+        // break the loop and return the value we got
+        return Ok(value);
+    }
 }
 
 fn make_paginated_github_request<T>(
