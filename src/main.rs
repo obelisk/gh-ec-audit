@@ -1,4 +1,5 @@
 use colored::Colorize;
+use gh_ec_audit::bpr;
 use gh_ec_audit::deploy_key;
 use gh_ec_audit::external_collaborator;
 
@@ -6,7 +7,6 @@ use clap::{command, Parser};
 use gh_ec_audit::members;
 use gh_ec_audit::Bootstrap;
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -26,6 +26,10 @@ struct Args {
     #[arg(short, long)]
     admin: bool,
 
+    /// Run the BPR and rulesets audit
+    #[arg(short, long)]
+    bpr: bool,
+
     /// Limit the scanning to the given repos
     #[clap(short, long, value_delimiter = ',', num_args = 1..)]
     repos: Option<Vec<String>>,
@@ -36,6 +40,8 @@ struct Args {
 }
 
 fn main() {
+    let args = Args::parse();
+
     let bootstrap = match Bootstrap::new() {
         Ok(b) => b,
         Err(e) => {
@@ -43,8 +49,6 @@ fn main() {
             std::process::exit(1);
         }
     };
-
-    let args = Args::parse();
 
     if args.ec {
         external_collaborator::run_audit(bootstrap, args.previous);
@@ -54,6 +58,8 @@ fn main() {
         members::run_audit(bootstrap);
     } else if args.admin {
         members::run_admin_audit(bootstrap, args.repos);
+    } else if args.bpr {
+        bpr::run_audit(bootstrap, args.repos);
     } else {
         println!("No command specified");
     }
