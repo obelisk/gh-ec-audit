@@ -53,6 +53,13 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             .map(|r| Repository {
                 name: r,
                 private: false,
+                permissions: Permissions {
+                    admin: false,
+                    push: false,
+                    pull: false,
+                    triage: false,
+                    maintain: false,
+                },
             })
             .collect(),
         None => bootstrap.fetch_all_repositories(75).unwrap(),

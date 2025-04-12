@@ -11,13 +11,14 @@ pub mod bpr;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
+pub mod teams;
 
 pub trait GitHubIndex {
     fn index(&self) -> String;
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-struct Permissions {
+pub struct Permissions {
     pull: bool,
     triage: bool,
     push: bool,
@@ -85,6 +86,7 @@ impl Display for GitHubError {
 pub struct Repository {
     pub name: String,
     pub private: bool,
+    pub permissions: Permissions,
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
