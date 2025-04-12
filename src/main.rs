@@ -5,6 +5,7 @@ use gh_ec_audit::external_collaborator;
 
 use clap::{command, Parser};
 use gh_ec_audit::members;
+use gh_ec_audit::teams;
 use gh_ec_audit::Bootstrap;
 
 #[derive(Parser, Debug)]
@@ -29,6 +30,13 @@ struct Args {
     /// Run the BPR and rulesets audit
     #[arg(short, long)]
     bpr: bool,
+
+    /// Run the BPR and rulesets audit
+    #[arg(short, long)]
+    teamperm: bool,
+
+    #[arg(long)]
+    team: Option<String>,
 
     /// Limit the scanning to the given repos
     #[clap(short, long, value_delimiter = ',', num_args = 1..)]
@@ -60,6 +68,12 @@ fn main() {
         members::run_admin_audit(bootstrap, args.repos);
     } else if args.bpr {
         bpr::run_audit(bootstrap, args.repos);
+    } else if args.teamaccess {
+        if let Some(team) = args.team {
+            teams::run_team_repo_audit(bootstrap, team);
+        } else {
+            println!("Please specify a team with --team");
+        }
     } else {
         println!("No command specified");
     }
