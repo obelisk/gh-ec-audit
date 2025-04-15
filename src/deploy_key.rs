@@ -21,7 +21,7 @@ struct DeployKey {
     enabled: bool,
 }
 
-pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>) {
+pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool) {
     println!("{}", "GitHub Deploy Key Audit".white().bold());
 
     println!("{}", "Fetching all organization members".yellow());
@@ -70,6 +70,36 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>) {
         };
 
         for deploy_key in deploy_keys {
+            match (all, members.contains_key(&deploy_key.added_by)) {
+                (true, is_member) => {
+                    println!(
+                        "{} has deploy key {} {}: {}",
+                        repository.name.white(),
+                        deploy_key.title.yellow(),
+                        if is_member {
+                            "added by member".yellow()
+                        } else {
+                            "added by non-member".red()
+                        },
+                        deploy_key.added_by.white()
+                    );
+                }
+                // We don't want all, and they are not a member so we
+                // log
+                (false, false) => {
+                    println!(
+                        "{} has deploy key {} {}: {}",
+                        repository.name.white(),
+                        deploy_key.title.yellow(),
+                        "added by non-member".red(),
+                        deploy_key.added_by.white()
+                    );
+                }
+                // We don't want all, and they are members so we can skip
+                // this deploy key
+                (false, true) => (),
+            }
+
             if !members.contains_key(&deploy_key.added_by) {
                 println!(
                     "{} has deploy key {} {}: {}",

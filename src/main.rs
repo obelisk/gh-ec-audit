@@ -38,6 +38,10 @@ struct Args {
     #[arg(long)]
     team: Option<String>,
 
+    // Disable filtering on specific audits
+    #[clap(long, default_value_t = false)]
+    all: bool,
+
     /// Limit the scanning to the given repos
     #[clap(short, long, value_delimiter = ',', num_args = 1..)]
     repos: Option<Vec<String>>,
@@ -61,14 +65,14 @@ fn main() {
     if args.ec {
         external_collaborator::run_audit(bootstrap, args.previous);
     } else if args.dk {
-        deploy_key::run_audit(bootstrap, args.previous);
+        deploy_key::run_audit(bootstrap, args.previous, args.all);
     } else if args.mem {
         members::run_audit(bootstrap);
     } else if args.admin {
         members::run_admin_audit(bootstrap, args.repos);
     } else if args.bpr {
         bpr::run_audit(bootstrap, args.repos);
-    } else if args.teamaccess {
+    } else if args.teamperm {
         if let Some(team) = args.team {
             teams::run_team_repo_audit(bootstrap, team);
         } else {
