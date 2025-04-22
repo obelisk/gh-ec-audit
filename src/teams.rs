@@ -4,12 +4,12 @@ use colored::Colorize;
 
 use crate::{make_github_request, make_paginated_github_request, Bootstrap, Repository, Team};
 
-/// Fetch all the repos for a given team and the permission it confers
-pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
+/// Returns the repos that a team has access to
+fn get_team_repos(bootstrap: &Bootstrap, team: String) -> HashSet<Repository> {
     let team_repos: HashSet<Repository> = match make_paginated_github_request(
         &bootstrap.token,
         25,
-        &format!("/orgs/{}/teams/{}/repos", &bootstrap.org, team),
+        &format!("/orgs/{}/teams/{}/repos", bootstrap.org, team),
         3,
         None,
     ) {
@@ -22,6 +22,12 @@ pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
             );
         }
     };
+    team_repos
+}
+
+/// Fetch all the repos for a given team and the permission it confers
+pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
+    let team_repos = get_team_repos(&bootstrap, team);
 
     println!(
         "{} {} {}",
@@ -92,10 +98,15 @@ pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
         ));
 
         if members.is_empty() {
+            // The team is empty: we want to see to how many repos it has access
+            let team_repos = get_team_repos(&bootstrap, team.slug);
             println!(
-                "{}: {}",
+                "{}: {}. {} {} {}",
                 "Found an empty GH team".yellow(),
-                team.name.white()
+                team.name.white(),
+                "This team has access to".yellow(),
+                team_repos.len().to_string().white(),
+                "repositories".yellow()
             );
         }
     }
