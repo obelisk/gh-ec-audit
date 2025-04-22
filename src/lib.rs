@@ -89,6 +89,12 @@ pub struct Repository {
     pub permissions: Permissions,
 }
 
+#[derive(serde::Deserialize, Hash, Eq, PartialEq)]
+pub struct Team {
+    pub name: String,
+    pub slug: String,
+}
+
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
 #[serde(untagged)]
 enum GitHubResponse<T> {
