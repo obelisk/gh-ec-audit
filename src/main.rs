@@ -31,9 +31,13 @@ struct Args {
     #[arg(short, long)]
     bpr: bool,
 
-    /// Run the BPR and rulesets audit
+    /// Run the team permissions audit
     #[arg(short, long)]
     teamperm: bool,
+
+    /// Run the empty teams audit
+    #[arg(long)]
+    emptyteams: bool,
 
     #[arg(long)]
     team: Option<String>,
@@ -78,6 +82,8 @@ fn main() {
         } else {
             println!("Please specify a team with --team");
         }
+    } else if args.emptyteams {
+        teams::run_empty_teams_audit(bootstrap);
     } else {
         println!("No command specified");
     }
