@@ -8,10 +8,12 @@ use std::{
 use colored::Colorize;
 
 pub mod bpr;
+pub mod codeowners;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
 pub mod teams;
+pub mod utils;
 
 pub trait GitHubIndex {
     fn index(&self) -> String;
@@ -33,9 +35,9 @@ pub struct Collaborator {
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-struct Member {
-    avatar_url: String,
-    login: String,
+pub struct Member {
+    pub avatar_url: String,
+    pub login: String,
 }
 
 impl GitHubIndex for Member {
@@ -93,6 +95,37 @@ pub struct Repository {
 pub struct Team {
     pub name: String,
     pub slug: String,
+}
+
+impl Team {
+    /// Return whether a team is empty, i.e., if the team has no members,
+    /// including its sub-teams.
+    fn is_empty(&self, bootstrap: &Bootstrap) -> bool {
+        // NOTE - We don't make a paginated request on purpose: we only want
+        // to see if a team is empty or not, and we don't need to fetch _all_ members.
+        let members = match make_github_request(
+            &bootstrap.token,
+            &format!("/orgs/{}/teams/{}/members", bootstrap.org, self.slug),
+            3,
+            None,
+        ) {
+            Ok(members) => members,
+            Err(e) => {
+                panic!(
+                    "{} {}: {}",
+                    "I couldn't fetch the members of team".red(),
+                    self.name,
+                    e
+                );
+            }
+        };
+        let members = members.as_array().expect(&format!(
+            "{}",
+            "The value returned by GH is not an array".red()
+        ));
+
+        members.is_empty()
+    }
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]

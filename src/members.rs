@@ -7,21 +7,23 @@ use crate::{
     Collaborator, Member, Permissions, Repository,
 };
 
-pub fn run_audit(bootstrap: Bootstrap) {
-    let members: HashSet<Member> = match make_paginated_github_request(
+pub fn get_org_members(bootstrap: &Bootstrap) -> HashSet<Member> {
+    match make_paginated_github_request(
         &bootstrap.token,
         100,
         &format!("/orgs/{}/members", &bootstrap.org),
         3,
         None,
     ) {
-        Ok(outside_collaborators) => outside_collaborators,
+        Ok(mem) => mem,
         Err(e) => {
             panic!("{}: {e}", "I couldn't fetch the organization members".red());
         }
-    };
+    }
+}
 
-    for member in members {
+pub fn run_audit(bootstrap: Bootstrap) {
+    for member in get_org_members(&bootstrap) {
         println!("{}", member.avatar_url);
     }
 }

@@ -4,6 +4,7 @@ use gh_ec_audit::deploy_key;
 use gh_ec_audit::external_collaborator;
 
 use clap::{command, Parser};
+use gh_ec_audit::codeowners;
 use gh_ec_audit::members;
 use gh_ec_audit::teams;
 use gh_ec_audit::Bootstrap;
@@ -39,12 +40,21 @@ struct Args {
     #[arg(long)]
     emptyteams: bool,
 
+    /// Run the CODEOWNERS audit
+    #[arg(short, long)]
+    codeowners: bool,
+
+    /// Focus the audit on a given GH team
     #[arg(long)]
     team: Option<String>,
 
-    // Disable filtering on specific audits
+    /// Disable filtering on specific audits
     #[clap(long, default_value_t = false)]
     all: bool,
+
+    /// Use GH search API instead of enumerating repos (only for specific audits)
+    #[clap(long, default_value_t = false)]
+    search: bool,
 
     /// Limit the scanning to the given repos
     #[clap(short, long, value_delimiter = ',', num_args = 1..)]
@@ -84,6 +94,8 @@ fn main() {
         }
     } else if args.emptyteams {
         teams::run_empty_teams_audit(bootstrap);
+    } else if args.codeowners {
+        codeowners::run_codeowners_audit(bootstrap, args.team, args.repos, args.search);
     } else {
         println!("No command specified");
     }
