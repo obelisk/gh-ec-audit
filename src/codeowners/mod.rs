@@ -5,7 +5,7 @@ mod search;
 
 use std::collections::HashSet;
 
-use crate::{members::get_org_members, teams::get_org_teams, Bootstrap};
+use crate::{make_github_request, members::get_org_members, teams::get_org_teams, Bootstrap};
 use colored::Colorize;
 use regex::Regex;
 
@@ -28,58 +28,23 @@ pub fn run_codeowners_audit(
     team: Option<String>,
     repos: Option<Vec<String>>,
     search: bool,
+    also_gh_api: bool,
 ) {
+    // Immediately stop if we received incompatible options
     if search && repos.is_some() {
         panic!("{}", "Using --search assumes an org-wide search, and it is not supported in conjunction with a list of repos (i.e., --repos).".red());
     }
 
-    /*if let Some(ref repos) = repos {
-        for repo in repos {
-            match get_codeowners_errors(&bootstrap, &repo) {
-                Ok(kinds) => {
-                    if kinds.is_empty() {
-                        println!(
-                            "{} {}",
-                            "No errors detected in CODEOWNERS file for repo".green(),
-                            repo.white()
-                        );
-                    } else {
-                        println!(
-                            "{} {}: {:?}",
-                            "Errors detected in CODEOWNERS file for repo".red(),
-                            repo.white(),
-                            kinds
-                        );
-                    }
-                }
-                Err(e) => {
-                    println!(
-                        "{} {} {} {}",
-                        "Warning!".yellow(),
-                        e.white(),
-                        "for repo".yellow(),
-                        repo.white()
-                    );
-                }
-            }
-        }
-        return;
-    }*/
-
     if team.is_none() {
-        // If we don't receive a team, then we audit all CODEOWNERS files in the org.
-        // This means we will look at the CODEOWNERS files and determine
+        // If we didn't receive a team, then we audit CODEOWNERS files to determine
         // * If all users mentioned in the file exist and are members of the org
         // * If all teams mentioned in the file exist
         // We will also alert if a team is empty.
-        println!(
-            "{}",
-            "Searching for CODEOWNERS files across the org...".yellow()
-        );
+        println!("{}", "Searching for CODEOWNERS files...".yellow());
 
         let codeowners_files = match search {
             true => search::find_codeowners_in_org(&bootstrap),
-            false => iterate::find_codeowners_in_org(&bootstrap, repos),
+            false => iterate::find_codeowners_in_org(&bootstrap, repos.clone()),
         };
 
         println!(
@@ -104,12 +69,12 @@ pub fn run_codeowners_audit(
         let mut empty_teams = HashSet::<String>::new();
 
         // Analyze each CO file we found
-        for co_file in codeowners_files {
+        for co_file in &codeowners_files {
             let mut no_errors = true;
 
             // Check if all the users mentioned in the CO file are in the org
-            for user in co_file.users {
-                if org_members.iter().find(|u| u.login == user).is_none() {
+            for user in &co_file.users {
+                if org_members.iter().find(|u| u.login == *user).is_none() {
                     no_errors = false;
                     println!(
                         "{} {} {} {} {}",
@@ -123,8 +88,8 @@ pub fn run_codeowners_audit(
             }
 
             // Check if all the teams mentioned in the CO file exist and alert if a team is empty.
-            for team in co_file.teams {
-                match org_teams.iter().find(|t| t.slug == team) {
+            for team in &co_file.teams {
+                match org_teams.iter().find(|t| t.slug == *team) {
                     None => {
                         no_errors = false;
                         println!(
@@ -137,8 +102,8 @@ pub fn run_codeowners_audit(
                         );
                     }
                     Some(t) => {
-                        // Check if the team is empty, starting from looking into the cache: if
-                        // it's not there, let's call GH API and update the cache accordingly.
+                        // Check if the team is empty, by first looking into the cache: if
+                        // it's not there, we call GH API and update the cache accordingly.
                         // Note - the || operator short-circuits, so we are making the call to GH API
                         // only if the team is not in our cache.
                         if empty_teams.contains(&t.slug) || t.is_empty(&bootstrap) {
@@ -166,6 +131,52 @@ pub fn run_codeowners_audit(
                     "No errors detected in CODEOWNERS file for repo".green(),
                     co_file.repo.white()
                 );
+            }
+        }
+
+        // If we were told to also use the GH API, we do it here
+        if also_gh_api {
+            println!(
+                "{}",
+                "\nNow auditing CODEOWNERS using the GH REST API...".yellow()
+            );
+            // The repos we will scan are those that were passed or (if nothing was passed)
+            // all those that we collected CO files for in the previous steps.
+            let repos = repos.unwrap_or_else(|| {
+                codeowners_files
+                    .iter()
+                    .map(|file| file.repo.clone())
+                    .collect()
+            });
+            for repo in repos {
+                // Call the GH API
+                match get_codeowners_errors(&bootstrap, &repo) {
+                    Ok(kinds) => {
+                        if kinds.is_empty() {
+                            println!(
+                                "{} {}",
+                                "No errors detected in CODEOWNERS file for repo".green(),
+                                repo.white()
+                            );
+                        } else {
+                            println!(
+                                "{} {}: {:?}",
+                                "Errors detected in CODEOWNERS file for repo".red(),
+                                repo.white(),
+                                kinds
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        println!(
+                            "{} {} {} {}",
+                            "Warning!".yellow(),
+                            e.white(),
+                            "for repo".yellow(),
+                            repo.white()
+                        );
+                    }
+                }
             }
         }
     } else {
@@ -228,7 +239,7 @@ fn codeowner_content_to_obj(
     }
 }
 
-/*/// Call the GH API and retrieve errors detected in the CODEOWNERS file.
+/// Call the GH API and retrieve errors detected in the CODEOWNERS file.
 fn get_codeowners_errors(bootstrap: &Bootstrap, repo: &str) -> Result<Vec<String>, String> {
     let url = format!("/repos/{}/{repo}/codeowners/errors", bootstrap.org);
     let res = make_github_request(&bootstrap.token, &url, 3, None).unwrap();
@@ -238,12 +249,13 @@ fn get_codeowners_errors(bootstrap: &Bootstrap, repo: &str) -> Result<Vec<String
             return Err("CODEOWNERS file not found".to_string());
         }
         Some(errors) => {
-            let errors = errors.as_array().unwrap();
             let kinds: Vec<String> = errors
+                .as_array()
+                .unwrap()
                 .iter()
                 .map(|e| e.get("kind").unwrap().as_str().unwrap().to_string())
                 .collect();
             Ok(kinds)
         }
     }
-}*/
+}

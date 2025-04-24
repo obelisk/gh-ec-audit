@@ -44,6 +44,10 @@ struct Args {
     #[arg(short, long)]
     codeowners: bool,
 
+    /// Also invoke the GH API to get extra info when auditing CODEOWNERS
+    #[arg(long)]
+    also_gh_api: bool,
+
     /// Focus the audit on a given GH team
     #[arg(long)]
     team: Option<String>,
@@ -95,7 +99,13 @@ fn main() {
     } else if args.emptyteams {
         teams::run_empty_teams_audit(bootstrap);
     } else if args.codeowners {
-        codeowners::run_codeowners_audit(bootstrap, args.team, args.repos, args.search);
+        codeowners::run_codeowners_audit(
+            bootstrap,
+            args.team,
+            args.repos,
+            args.search,
+            args.also_gh_api,
+        );
     } else {
         println!("No command specified");
     }

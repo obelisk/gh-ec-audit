@@ -14,6 +14,7 @@ fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> (String, String) {
     let mut content = String::new();
     let mut html_url = String::new();
     for location in CO_LOCATIONS {
+        // Try to download the file and fill in `content` and `html_url`
         let url = format!("/repos/{}/{}/contents/{}", bootstrap.org, repo, location);
         let res = make_github_request(&bootstrap.token, &url, 3, None);
         match res {

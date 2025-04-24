@@ -65,11 +65,6 @@ impl Permissions {
         }
         "none".to_string()
     }
-
-    /*/// Return whether the permission is Write or higher
-    fn write_or_higher(&self) -> bool {
-        ["admin", "maintain", "push"].contains(&self.highest_perm().as_str())
-    }*/
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
