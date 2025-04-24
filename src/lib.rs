@@ -448,7 +448,7 @@ fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> HashSet<TeamWithPermissi
             panic!(
                 "{} {}: {e}",
                 repo.white(),
-                "I couldn't fetch the repository collaborators".red()
+                "I couldn't fetch teams with access to the repo".red()
             );
         }
     };
