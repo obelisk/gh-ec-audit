@@ -33,6 +33,39 @@ pub fn run_codeowners_audit(
         panic!("{}", "Using --search assumes an org-wide search, and it is not supported in conjunction with a list of repos (i.e., --repos).".red());
     }
 
+    /*if let Some(ref repos) = repos {
+        for repo in repos {
+            match get_codeowners_errors(&bootstrap, &repo) {
+                Ok(kinds) => {
+                    if kinds.is_empty() {
+                        println!(
+                            "{} {}",
+                            "No errors detected in CODEOWNERS file for repo".green(),
+                            repo.white()
+                        );
+                    } else {
+                        println!(
+                            "{} {}: {:?}",
+                            "Errors detected in CODEOWNERS file for repo".red(),
+                            repo.white(),
+                            kinds
+                        );
+                    }
+                }
+                Err(e) => {
+                    println!(
+                        "{} {} {} {}",
+                        "Warning!".yellow(),
+                        e.white(),
+                        "for repo".yellow(),
+                        repo.white()
+                    );
+                }
+            }
+        }
+        return;
+    }*/
+
     if team.is_none() {
         // If we don't receive a team, then we audit all CODEOWNERS files in the org.
         // This means we will look at the CODEOWNERS files and determine
@@ -72,14 +105,12 @@ pub fn run_codeowners_audit(
 
         // Analyze each CO file we found
         for co_file in codeowners_files {
-            // Fetch all users and teams that have access to this repo.
-            // We will use this info to check if users/teams mentioned in the CO file have sufficient access.
-            /*let repo_collabs = get_repo_collaborators(&bootstrap, &co_file.repo);
-            let repo_teams = get_repo_teams(&bootstrap, &co_file.repo);*/
+            let mut no_errors = true;
 
-            // Check if all the users mentioned in the CO file are in the org, have access to the repo, and have sufficient permissions
+            // Check if all the users mentioned in the CO file are in the org
             for user in co_file.users {
                 if org_members.iter().find(|u| u.login == user).is_none() {
+                    no_errors = false;
                     println!(
                         "{} {} {} {} {}",
                         "Error in CODEOWNERS file".red(),
@@ -89,37 +120,13 @@ pub fn run_codeowners_audit(
                         "does not belong to the org".red()
                     );
                 }
-                /*match repo_collabs.iter().find(|rc| rc.login == user) {
-                    None => {
-                        println!(
-                            "{} {} {} {} {}",
-                            "Error in CODEOWNERS file".red(),
-                            co_file.url.white(),
-                            "User".red(),
-                            user.white(),
-                            "does not have access to the repo".red()
-                        );
-                    }
-                    Some(rc) => {
-                        if !rc.permissions.write_or_higher() {
-                            println!(
-                                "{} {} {} {} {}",
-                                "Error in CODEOWNERS file".red(),
-                                co_file.url.white(),
-                                "User".red(),
-                                user.white(),
-                                "does not have sufficient permissions on repo".red()
-                            );
-                        }
-                    }
-                }*/
             }
 
             // Check if all the teams mentioned in the CO file exist and alert if a team is empty.
-            // Also check if teams have access to the repo and have sufficient permissions.
             for team in co_file.teams {
                 match org_teams.iter().find(|t| t.slug == team) {
                     None => {
+                        no_errors = false;
                         println!(
                             "{} {} {} {} {}",
                             "Error in CODEOWNERS file".red(),
@@ -135,6 +142,7 @@ pub fn run_codeowners_audit(
                         // Note - the || operator short-circuits, so we are making the call to GH API
                         // only if the team is not in our cache.
                         if empty_teams.contains(&t.slug) || t.is_empty(&bootstrap) {
+                            no_errors = false;
                             println!(
                                 "{} {} {} {}",
                                 "Warning! CODEOWNERS file".red(),
@@ -147,34 +155,17 @@ pub fn run_codeowners_audit(
                             // The team is not empty. Let's insert it into the non-empty cache (repeated
                             // insertions don't matter because it's a HashSet).
                             non_empty_teams.insert(t.slug.clone());
-
-                            /*match repo_teams.iter().find(|rt| rt.slug == t.slug) {
-                                None => {
-                                    println!(
-                                        "{} {} {} {} {}",
-                                        "Error in CODEOWNERS file".red(),
-                                        co_file.url.white(),
-                                        "Team".red(),
-                                        t.slug.white(),
-                                        "does not have access to the repo".red()
-                                    );
-                                }
-                                Some(rt) => {
-                                    if !rt.permissions.write_or_higher() {
-                                        println!(
-                                            "{} {} {} {} {}",
-                                            "Error in CODEOWNERS file".red(),
-                                            co_file.url.white(),
-                                            "Team".red(),
-                                            t.slug.white(),
-                                            "does not have sufficient permissions on repo".red()
-                                        );
-                                    }
-                                }
-                            }*/
                         }
                     }
                 }
+            }
+
+            if no_errors {
+                println!(
+                    "{} {}",
+                    "No errors detected in CODEOWNERS file for repo".green(),
+                    co_file.repo.white()
+                );
             }
         }
     } else {
@@ -236,3 +227,23 @@ fn codeowner_content_to_obj(
         teams,
     }
 }
+
+/*/// Call the GH API and retrieve errors detected in the CODEOWNERS file.
+fn get_codeowners_errors(bootstrap: &Bootstrap, repo: &str) -> Result<Vec<String>, String> {
+    let url = format!("/repos/{}/{repo}/codeowners/errors", bootstrap.org);
+    let res = make_github_request(&bootstrap.token, &url, 3, None).unwrap();
+    match res.get("errors") {
+        None => {
+            // If this field is not present, it means a CO file has not been found
+            return Err("CODEOWNERS file not found".to_string());
+        }
+        Some(errors) => {
+            let errors = errors.as_array().unwrap();
+            let kinds: Vec<String> = errors
+                .iter()
+                .map(|e| e.get("kind").unwrap().as_str().unwrap().to_string())
+                .collect();
+            Ok(kinds)
+        }
+    }
+}*/
