@@ -65,6 +65,11 @@ impl Permissions {
         }
         "none".to_string()
     }
+
+    /*/// Return whether the permission is Write or higher
+    fn write_or_higher(&self) -> bool {
+        ["admin", "maintain", "push"].contains(&self.highest_perm().as_str())
+    }*/
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
@@ -95,6 +100,13 @@ pub struct Repository {
 pub struct Team {
     pub name: String,
     pub slug: String,
+}
+
+#[derive(serde::Deserialize, Hash, Eq, PartialEq)]
+pub struct TeamWithPermissions {
+    pub name: String,
+    pub slug: String,
+    pub permissions: Permissions,
 }
 
 impl Team {
@@ -404,4 +416,46 @@ impl Bootstrap {
 
         Ok(repositories)
     }
+}
+
+/// Get collaborators for a given repository
+fn get_repo_collaborators(bootstrap: &Bootstrap, repo: &str) -> HashSet<Collaborator> {
+    let collaborators: HashSet<Collaborator> = match make_paginated_github_request(
+        &bootstrap.token,
+        25,
+        &format!("/repos/{}/{}/collaborators", &bootstrap.org, repo),
+        3,
+        None,
+    ) {
+        Ok(collaborators) => collaborators,
+        Err(e) => {
+            panic!(
+                "{} {}: {e}",
+                repo.white(),
+                "I couldn't fetch the repository collaborators".red()
+            );
+        }
+    };
+    collaborators
+}
+
+/// Get the teams that have access to the repo
+fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> HashSet<TeamWithPermissions> {
+    let repo_teams: HashSet<TeamWithPermissions> = match make_paginated_github_request(
+        &bootstrap.token,
+        25,
+        &format!("/repos/{}/{}/teams", &bootstrap.org, repo),
+        3,
+        None,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            panic!(
+                "{} {}: {e}",
+                repo.white(),
+                "I couldn't fetch the repository collaborators".red()
+            );
+        }
+    };
+    repo_teams
 }

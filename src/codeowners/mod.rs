@@ -70,8 +70,14 @@ pub fn run_codeowners_audit(
         let mut non_empty_teams = HashSet::<String>::new();
         let mut empty_teams = HashSet::<String>::new();
 
+        // Analyze each CO file we found
         for co_file in codeowners_files {
-            // Check if all the users are in the org
+            // Fetch all users and teams that have access to this repo.
+            // We will use this info to check if users/teams mentioned in the CO file have sufficient access.
+            /*let repo_collabs = get_repo_collaborators(&bootstrap, &co_file.repo);
+            let repo_teams = get_repo_teams(&bootstrap, &co_file.repo);*/
+
+            // Check if all the users mentioned in the CO file are in the org, have access to the repo, and have sufficient permissions
             for user in co_file.users {
                 if org_members.iter().find(|u| u.login == user).is_none() {
                     println!(
@@ -83,9 +89,34 @@ pub fn run_codeowners_audit(
                         "does not belong to the org".red()
                     );
                 }
+                /*match repo_collabs.iter().find(|rc| rc.login == user) {
+                    None => {
+                        println!(
+                            "{} {} {} {} {}",
+                            "Error in CODEOWNERS file".red(),
+                            co_file.url.white(),
+                            "User".red(),
+                            user.white(),
+                            "does not have access to the repo".red()
+                        );
+                    }
+                    Some(rc) => {
+                        if !rc.permissions.write_or_higher() {
+                            println!(
+                                "{} {} {} {} {}",
+                                "Error in CODEOWNERS file".red(),
+                                co_file.url.white(),
+                                "User".red(),
+                                user.white(),
+                                "does not have sufficient permissions on repo".red()
+                            );
+                        }
+                    }
+                }*/
             }
 
-            // Check if all the teams exist and alert if a team is empty
+            // Check if all the teams mentioned in the CO file exist and alert if a team is empty.
+            // Also check if teams have access to the repo and have sufficient permissions.
             for team in co_file.teams {
                 match org_teams.iter().find(|t| t.slug == team) {
                     None => {
@@ -99,12 +130,7 @@ pub fn run_codeowners_audit(
                         );
                     }
                     Some(t) => {
-                        // Let's check if the team is empty or not by first looking into our cache
-                        if non_empty_teams.contains(&t.slug) {
-                            // Nothing more to be done
-                            continue;
-                        }
-                        // If we are here, the team might be empty. Let's again look in the cache: if
+                        // Check if the team is empty, starting from looking into the cache: if
                         // it's not there, let's call GH API and update the cache accordingly.
                         // Note - the || operator short-circuits, so we are making the call to GH API
                         // only if the team is not in our cache.
@@ -118,7 +144,34 @@ pub fn run_codeowners_audit(
                             );
                             empty_teams.insert(t.slug.clone());
                         } else {
+                            // The team is not empty. Let's insert it into the non-empty cache (repeated
+                            // insertions don't matter because it's a HashSet).
                             non_empty_teams.insert(t.slug.clone());
+
+                            /*match repo_teams.iter().find(|rt| rt.slug == t.slug) {
+                                None => {
+                                    println!(
+                                        "{} {} {} {} {}",
+                                        "Error in CODEOWNERS file".red(),
+                                        co_file.url.white(),
+                                        "Team".red(),
+                                        t.slug.white(),
+                                        "does not have access to the repo".red()
+                                    );
+                                }
+                                Some(rt) => {
+                                    if !rt.permissions.write_or_higher() {
+                                        println!(
+                                            "{} {} {} {} {}",
+                                            "Error in CODEOWNERS file".red(),
+                                            co_file.url.white(),
+                                            "Team".red(),
+                                            t.slug.white(),
+                                            "does not have sufficient permissions on repo".red()
+                                        );
+                                    }
+                                }
+                            }*/
                         }
                     }
                 }
