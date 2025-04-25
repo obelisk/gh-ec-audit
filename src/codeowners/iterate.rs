@@ -8,11 +8,9 @@ use super::{codeowner_content_to_obj, CodeownersFile};
 /// For more info, see https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-file-location
 const CO_LOCATIONS: [&str; 3] = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
 
-/// Search for CO file in the possible locations and download the file.
-/// Stop as soon as a matching file is found.
+/// Search for a CO file in the possible locations and download the file, returning its content and HTML URL. Stop as soon as a matching file is found.  
+/// From GH docs: "If CODEOWNERS files exist in more than one of those locations, GitHub will search for them in that order and use the first one it finds.""
 fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> (String, String) {
-    let mut content = String::new();
-    let mut html_url = String::new();
     for location in CO_LOCATIONS {
         // Try to download the file and fill in `content` and `html_url`
         let url = format!("/repos/{}/{}/contents/{}", bootstrap.org, repo, location);
@@ -29,13 +27,14 @@ fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> (String, String) {
                         }
                     }
                 }
-                html_url = v.get("html_url").unwrap().as_str().unwrap().to_string();
-                content = process_fetch_file_result(v);
-                break;
+                let html_url = v.get("html_url").unwrap().as_str().unwrap().to_string();
+                let content = process_fetch_file_result(v);
+                return (content, html_url);
             }
         }
     }
-    (content, html_url)
+    // If we are here, then no CO file was found: we return empty strings.
+    (String::new(), String::new())
 }
 
 /// Find all the codeowners files in an organization

@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     get_repo_teams, make_paginated_github_request, make_paginated_github_request_with_index,
-    Bootstrap, Collaborator, Member, Permissions, Repository, TeamWithPermissions,
+    Bootstrap, Collaborator, Member, Permissions, Repository, Team,
 };
 
 pub fn get_org_members(bootstrap: &Bootstrap) -> HashSet<Member> {
@@ -72,8 +72,8 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
 
         let repo_admin_teams = repo_teams
             .iter()
-            .filter(|t| t.permissions.admin)
-            .collect::<Vec<&TeamWithPermissions>>();
+            .filter(|t| t.permissions.as_ref().unwrap().admin)
+            .collect::<Vec<&Team>>();
 
         for repo_admin_team in &repo_admin_teams {
             println!(

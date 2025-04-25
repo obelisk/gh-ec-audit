@@ -95,13 +95,7 @@ pub struct Repository {
 pub struct Team {
     pub name: String,
     pub slug: String,
-}
-
-#[derive(serde::Deserialize, Hash, Eq, PartialEq)]
-pub struct TeamWithPermissions {
-    pub name: String,
-    pub slug: String,
-    pub permissions: Permissions,
+    pub permissions: Option<Permissions>,
 }
 
 impl Team {
@@ -435,8 +429,8 @@ fn get_repo_collaborators(bootstrap: &Bootstrap, repo: &str) -> HashSet<Collabor
 }
 
 /// Get the teams that have access to the repo
-fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> HashSet<TeamWithPermissions> {
-    let repo_teams: HashSet<TeamWithPermissions> = match make_paginated_github_request(
+fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> HashSet<Team> {
+    let repo_teams: HashSet<Team> = match make_paginated_github_request(
         &bootstrap.token,
         25,
         &format!("/repos/{}/{}/teams", &bootstrap.org, repo),

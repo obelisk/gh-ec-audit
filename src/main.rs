@@ -44,6 +44,10 @@ struct Args {
     #[arg(short, long)]
     codeowners: bool,
 
+    /// Find occurrences of a team in CODEOWNERS files
+    #[arg(long)]
+    team_in_codeowners: bool,
+
     /// Also invoke the GH API to get extra info when auditing CODEOWNERS
     #[arg(long)]
     also_gh_api: bool,
@@ -99,13 +103,13 @@ fn main() {
     } else if args.emptyteams {
         teams::run_empty_teams_audit(bootstrap);
     } else if args.codeowners {
-        codeowners::run_codeowners_audit(
-            bootstrap,
-            args.team,
-            args.repos,
-            args.search,
-            args.also_gh_api,
-        );
+        codeowners::run_codeowners_audit(bootstrap, args.repos, args.search, args.also_gh_api);
+    } else if args.team_in_codeowners {
+        if let Some(team) = args.team {
+            codeowners::run_team_in_codeowners_audit(bootstrap, team, args.search);
+        } else {
+            println!("Please specify a team with --team");
+        }
     } else {
         println!("No command specified");
     }
