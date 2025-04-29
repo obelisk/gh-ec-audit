@@ -40,7 +40,9 @@ pub fn find_codeowners_in_org(bootstrap: &Bootstrap) -> Vec<CodeownersFile> {
             let api_url = item.get("url").unwrap().as_str().unwrap();
             let content = crate::utils::fetch_file_content(&bootstrap, api_url);
 
-            all_results.push(codeowner_content_to_obj(bootstrap, content, html_url, repo));
+            if let Some(content) = content {
+                all_results.push(codeowner_content_to_obj(bootstrap, content, html_url, repo));
+            }
         }
         page += 1;
     }

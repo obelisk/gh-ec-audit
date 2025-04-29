@@ -29,7 +29,14 @@ fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> Option<(String, String)> {
                 }
                 let html_url = v.get("html_url").unwrap().as_str().unwrap().to_string();
                 let content = process_fetch_file_result(v);
-                return Some((content, html_url));
+
+                if let Some(content) = content {
+                    return Some((content, html_url));
+                } else {
+                    // We return None instead of continuing the for-loop because a file was found:
+                    // we just did not manage to get its content, for some reason.
+                    return None;
+                }
             }
         }
     }
