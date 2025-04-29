@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use colored::Colorize;
 
-use crate::{make_paginated_github_request, Bootstrap, Repository, Team};
+use crate::{
+    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap, Repository,
+    Team,
+};
 
 /// Returns the repos that a team has access to
 fn get_team_repos(bootstrap: &Bootstrap, team: String) -> HashSet<Repository> {
@@ -43,7 +46,7 @@ pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
 
 /// Get a list of all teams in the org
 pub fn get_org_teams(bootstrap: &Bootstrap) -> HashSet<Team> {
-    let teams: HashSet<Team> = match make_paginated_github_request(
+    match make_paginated_github_request(
         &bootstrap.token,
         25,
         &format!("/orgs/{}/teams", &bootstrap.org),
@@ -57,9 +60,26 @@ pub fn get_org_teams(bootstrap: &Bootstrap) -> HashSet<Team> {
                 "I couldn't fetch the list of teams in the org".red()
             );
         }
-    };
+    }
+}
 
-    teams
+/// Get a list of all teams in the org, indexed by the team slug
+pub fn get_indexed_org_teams(bootstrap: &Bootstrap) -> HashMap<String, Team> {
+    match make_paginated_github_request_with_index(
+        &bootstrap.token,
+        25,
+        &format!("/orgs/{}/teams", &bootstrap.org),
+        3,
+        None,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            panic!(
+                "{}: {e}",
+                "I couldn't fetch the list of teams in the org".red()
+            );
+        }
+    }
 }
 
 /// Fetch all empty teams, i.e., teams with no members

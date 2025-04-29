@@ -98,6 +98,12 @@ pub struct Team {
     pub permissions: Option<Permissions>,
 }
 
+impl GitHubIndex for Team {
+    fn index(&self) -> String {
+        self.slug.clone()
+    }
+}
+
 impl Team {
     /// Return whether a team is empty, i.e., if the team has no members,
     /// including its sub-teams.

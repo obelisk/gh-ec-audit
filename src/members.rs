@@ -22,6 +22,21 @@ pub fn get_org_members(bootstrap: &Bootstrap) -> HashSet<Member> {
     }
 }
 
+pub fn get_indexed_org_members(bootstrap: &Bootstrap) -> HashMap<String, Member> {
+    match make_paginated_github_request_with_index(
+        &bootstrap.token,
+        100,
+        &format!("/orgs/{}/members", &bootstrap.org),
+        3,
+        None,
+    ) {
+        Ok(mem) => mem,
+        Err(e) => {
+            panic!("{}: {e}", "I couldn't fetch the organization members".red());
+        }
+    }
+}
+
 pub fn run_audit(bootstrap: Bootstrap) {
     for member in get_org_members(&bootstrap) {
         println!("{}", member.avatar_url);

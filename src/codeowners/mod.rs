@@ -6,7 +6,7 @@ mod search;
 
 use std::collections::HashSet;
 
-use crate::{members::get_org_members, teams::get_org_teams, Bootstrap};
+use crate::{members::get_indexed_org_members, teams::get_indexed_org_teams, Bootstrap};
 use colored::Colorize;
 use regex::Regex;
 
@@ -61,8 +61,8 @@ pub fn run_codeowners_audit(
 
     // Get all members and teams in the org, so that we can efficiently
     // cross-check the content of all the CODEOWNERS files we have found.
-    let org_members = get_org_members(&bootstrap);
-    let org_teams = get_org_teams(&bootstrap);
+    let org_members = get_indexed_org_members(&bootstrap);
+    let org_teams = get_indexed_org_teams(&bootstrap);
 
     audit::audit_co_files(&bootstrap, &codeowners_files, &org_members, &org_teams);
 

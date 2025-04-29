@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{make_github_request, Bootstrap, Member, Team};
 
@@ -9,8 +9,8 @@ use colored::Colorize;
 pub fn audit_co_files(
     bootstrap: &Bootstrap,
     codeowners_files: &[CodeownersFile],
-    org_members: &HashSet<Member>,
-    org_teams: &HashSet<Team>,
+    org_members: &HashMap<String, Member>,
+    org_teams: &HashMap<String, Team>,
 ) {
     // Keep a growing cache of empty and non-empty teams to make checks more efficient.
     let mut non_empty_teams = HashSet::<String>::new();
@@ -21,7 +21,7 @@ pub fn audit_co_files(
 
         // Check if all the users mentioned in the CO file are in the org
         for user in &co_file.users {
-            if org_members.iter().find(|u| u.login == *user).is_none() {
+            if !org_members.contains_key(user) {
                 no_errors = false;
                 println!(
                     "{} {} {} {} {}",
@@ -36,39 +36,39 @@ pub fn audit_co_files(
 
         // Check if all the teams mentioned in the CO file exist and alert if a team is empty.
         for team in &co_file.teams {
-            match org_teams.iter().find(|t| t.slug == *team) {
-                None => {
-                    no_errors = false;
-                    println!(
-                        "{} {} {} {} {}",
-                        "Error in CODEOWNERS file".red(),
-                        co_file.url.white(),
-                        "Team".red(),
-                        team.white(),
-                        "does not exist in the org".red()
-                    );
-                }
-                Some(t) => {
-                    // Check if the team is empty, by first looking into the cache: if
-                    // it's not there, we call GH API and update the cache accordingly.
-                    // Note - the || operator short-circuits, so we are making the call to GH API
-                    // only if the team is not in our cache.
-                    if empty_teams.contains(&t.slug) || t.is_empty(&bootstrap) {
-                        no_errors = false;
-                        println!(
-                            "{} {} {} {}",
-                            "Warning! CODEOWNERS file".yellow(),
-                            co_file.url.white(),
-                            "contains an empty team:".yellow(),
-                            t.slug.white(),
-                        );
-                        empty_teams.insert(t.slug.clone());
-                    } else {
-                        // The team is not empty. Let's insert it into the non-empty cache (repeated
-                        // insertions don't matter because it's a HashSet).
-                        non_empty_teams.insert(t.slug.clone());
-                    }
-                }
+            if !org_teams.contains_key(team) {
+                no_errors = false;
+                println!(
+                    "{} {} {} {} {}",
+                    "Error in CODEOWNERS file".red(),
+                    co_file.url.white(),
+                    "Team".red(),
+                    team.white(),
+                    "does not exist in the org".red()
+                );
+                continue;
+            }
+
+            let t = org_teams.get(team).unwrap(); // unwrap OK: we checked above
+
+            // Check if the team is empty, by first looking into the cache: if
+            // it's not there, we call the GH API and update the cache accordingly.
+            // Note - the || operator short-circuits, so we are making the call to GH API
+            // only if the team is not in our cache.
+            if empty_teams.contains(&t.slug) || t.is_empty(&bootstrap) {
+                no_errors = false;
+                println!(
+                    "{} {} {} {}",
+                    "Warning! CODEOWNERS file".yellow(),
+                    co_file.url.white(),
+                    "contains an empty team:".yellow(),
+                    t.slug.white(),
+                );
+                empty_teams.insert(t.slug.clone());
+            } else {
+                // The team is not empty. Let's insert it into the non-empty cache (repeated
+                // insertions don't matter because it's a HashSet).
+                non_empty_teams.insert(t.slug.clone());
             }
         }
 
