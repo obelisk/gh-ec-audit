@@ -10,7 +10,7 @@ const CO_LOCATIONS: [&str; 3] = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEO
 
 /// Search for a CO file in the possible locations and download the file, returning its content and HTML URL. Stop as soon as a matching file is found.  
 /// From GH docs: "If CODEOWNERS files exist in more than one of those locations, GitHub will search for them in that order and use the first one it finds.""
-fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> (String, String) {
+fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> Option<(String, String)> {
     for location in CO_LOCATIONS {
         // Try to download the file and fill in `content` and `html_url`
         let url = format!("/repos/{}/{}/contents/{}", bootstrap.org, repo, location);
@@ -29,12 +29,12 @@ fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> (String, String) {
                 }
                 let html_url = v.get("html_url").unwrap().as_str().unwrap().to_string();
                 let content = process_fetch_file_result(v);
-                return (content, html_url);
+                return Some((content, html_url));
             }
         }
     }
-    // If we are here, then no CO file was found: we return empty strings.
-    (String::new(), String::new())
+    // If we are here, then no CO file was found
+    None
 }
 
 /// Find all the codeowners files in an organization
@@ -54,8 +54,11 @@ pub fn find_codeowners_in_org(
     let mut all_results = vec![];
 
     for repo in repos {
-        let (content, html_url) = get_co_file(bootstrap, &repo);
-        if content == "" {
+        if let Some((content, html_url)) = get_co_file(bootstrap, &repo) {
+            all_results.push(codeowner_content_to_obj(
+                bootstrap, content, &html_url, &repo,
+            ));
+        } else {
             // We did not manage to fill the content: this means we did not find a CODEOWNERS for this repo
             println!(
                 "{} {}",
@@ -64,10 +67,6 @@ pub fn find_codeowners_in_org(
             );
             continue;
         }
-
-        all_results.push(codeowner_content_to_obj(
-            bootstrap, content, &html_url, &repo,
-        ));
     }
 
     all_results
