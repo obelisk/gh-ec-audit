@@ -6,7 +6,9 @@ use gh_ec_audit::external_collaborator;
 use clap::{command, Parser};
 use gh_ec_audit::codeowners;
 use gh_ec_audit::members;
+use gh_ec_audit::repos;
 use gh_ec_audit::teams;
+use gh_ec_audit::uar;
 use gh_ec_audit::Bootstrap;
 
 #[derive(Parser, Debug)]
@@ -59,6 +61,18 @@ struct Args {
     /// Disable filtering on specific audits
     #[clap(long, default_value_t = false)]
     all: bool,
+
+    /// Audit the repos in the org
+    #[clap(long)]
+    org_repos: bool,
+
+    /// Perform a User Access Review
+    #[clap(long)]
+    uar: bool,
+
+    /// Export audit result in CSV format (only for specific audits)
+    #[clap(long, value_name = "FILE")]
+    csv: Option<String>,
 
     /// Use GH search API instead of enumerating repos (only for specific audits)
     #[clap(long, default_value_t = false)]
@@ -119,6 +133,14 @@ fn main() {
             codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);
         } else {
             println!("Please specify a team with --team");
+        }
+    } else if args.org_repos {
+        repos::run_repos_audit(bootstrap);
+    } else if args.uar {
+        if let Some(repos) = args.repos {
+            uar::run_uar_audit(bootstrap, repos, args.csv);
+        } else {
+            println!("Please specify a list of repos with --repos");
         }
     } else {
         println!("No command specified");

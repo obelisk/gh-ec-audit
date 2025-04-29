@@ -12,14 +12,16 @@ pub mod codeowners;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
+pub mod repos;
 pub mod teams;
+pub mod uar;
 pub mod utils;
 
 pub trait GitHubIndex {
     fn index(&self) -> String;
 }
 
-#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq, Clone)]
 pub struct Permissions {
     pull: bool,
     triage: bool,
@@ -89,6 +91,11 @@ pub struct Repository {
     pub name: String,
     pub private: bool,
     pub permissions: Permissions,
+    pub archived: bool,
+    pub visibility: String,
+    // We leave this as a generic Value because its contents seem to change
+    // depending on some org-level settings (e.g., whether GHAS is enabled).
+    pub security_and_analysis: serde_json::Value,
 }
 
 #[derive(serde::Deserialize, Hash, Eq, PartialEq)]
@@ -121,6 +128,17 @@ impl Team {
             Some(v) => Ok(v.is_empty()),
             None => Err("The value returned by GitHub is not an array".to_string()),
         }
+    }
+
+    /// Fetch members of this team, including members of child teams
+    fn fetch_team_members(&self, bootstrap: &Bootstrap) -> Result<HashMap<String, Member>, String> {
+        make_paginated_github_request_with_index(
+            &bootstrap.token,
+            25,
+            &format!("/orgs/{}/teams/{}/members", &bootstrap.org, self.slug),
+            3,
+            None,
+        )
     }
 }
 
