@@ -71,8 +71,8 @@ struct Args {
     uar: bool,
 
     /// Export audit result in CSV format (only for specific audits)
-    #[clap(long, value_name = "FILE")]
-    csv: Option<String>,
+    #[clap(long)]
+    csv: bool,
 
     /// Use GH search API instead of enumerating repos (only for specific audits)
     #[clap(long, default_value_t = false)]

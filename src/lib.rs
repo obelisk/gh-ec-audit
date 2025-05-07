@@ -11,11 +11,14 @@ pub mod bpr;
 pub mod codeowners;
 pub mod deploy_key;
 pub mod external_collaborator;
+pub mod gql_queries;
 pub mod members;
 pub mod repos;
 pub mod teams;
 pub mod uar;
 pub mod utils;
+
+const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 pub trait GitHubIndex {
     fn index(&self) -> String;
@@ -443,4 +446,98 @@ fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> Result<HashSet<Team>, St
         3,
         None,
     )
+}
+
+#[derive(serde::Serialize)]
+pub struct GraphQLQuery {
+    query: String,
+    variables: HashMap<String, String>,
+}
+
+/// Make a GraphQL query on GitHub
+fn make_graphql_query(
+    gh_token: &str,
+    query: GraphQLQuery,
+    retries: u8,
+) -> Result<serde_json::Value, String> {
+    let query = serde_json::to_string(&query).unwrap();
+
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        let response = reqwest::blocking::Client::new()
+            .post(GRAPHQL_URL)
+            .header("User-Agent", "GitHub EC Audit")
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("Authorization", format!("Bearer {}", gh_token))
+            .body(query.clone())
+            .send()
+            .map(|response| response.text());
+
+        // Handle communication issues with GitHub
+        let content = match response {
+            Ok(Ok(content)) => content,
+            Ok(Err(e)) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't read response from GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+            Err(e) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't make request to GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+        };
+
+        let value = serde_json::from_str::<serde_json::Value>(&content)
+            .map_err(|e| format!("Could not deserialize GitHub's response. Error: {e}"))?;
+
+        // break the loop and return the value we got
+        return Ok(value);
+    }
+}
+
+/// Get the email address associated to a username, if available, through the configured SAML IdP.
+fn email_from_gh_username(bootstrap: &Bootstrap, user: impl Display) -> Option<String> {
+    let q = GraphQLQuery {
+        query: crate::gql_queries::USER2EMAIL.to_string(),
+        variables: [
+            ("org".to_string(), bootstrap.org.clone()),
+            ("user".to_string(), user.to_string()),
+        ]
+        .into(),
+    };
+    make_graphql_query(&bootstrap.token, q, 3)
+        .ok()?
+        .get("data")
+        .and_then(|v| v.get("organization"))
+        .and_then(|v| v.get("samlIdentityProvider"))
+        .and_then(|v| v.get("externalIdentities"))
+        .and_then(|v| v.get("edges"))
+        .and_then(|v| v.as_array())
+        .and_then(|v| v.get(0))
+        .and_then(|v| v.get("node"))
+        .and_then(|v| v.get("samlIdentity"))
+        .and_then(|v| v.get("nameId"))
+        .and_then(|v| v.as_str())
+        .and_then(|v| Some(v.to_string()))
 }
