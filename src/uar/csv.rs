@@ -1,50 +1,176 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Display,
     fs::File,
-    io::BufWriter,
-    io::Write,
+    io::{BufWriter, Write},
+    path::Path,
 };
 
 use colored::Colorize;
 
-use crate::{Collaborator, Team};
+use crate::{email_from_gh_username, Bootstrap, Collaborator, Permissions, Team};
 
-/// Export the data collected during the audit to a CSV file.
-pub(crate) fn export_to_csv(
-    csv_file: &str,
-    repo_access: &HashMap<String, (HashSet<Collaborator>, HashSet<Team>)>,
+/// Which format we are following when exporting data to CSV
+pub(crate) enum CsvFormat {
+    CodeOwners,
+    Traditional,
+}
+
+/// Write to a CSV file the information we collected during a repo audit
+pub(crate) fn repo_audit_to_csv(
+    bootstrap: &Bootstrap,
+    csv_file: impl Display,
+    users: &HashSet<Collaborator>,
+    teams: &HashSet<Team>,
+    format: CsvFormat,
 ) {
-    let mut file_lines = vec![];
-
-    // repo, username, role, user/team
-    for (repo, (users, teams)) in repo_access {
-        for u in users {
-            file_lines.push(format!(
-                "{repo},{},{},user",
-                u.login,
-                u.permissions.highest_perm()
-            ));
-        }
-
-        for t in teams {
-            file_lines.push(format!(
-                "{repo},{},{},team",
-                t.slug,
-                t.permissions.as_ref().unwrap().highest_perm()
-            ));
-        }
+    // Create file and all intermediate folders if necessary
+    let csv_file = csv_file.to_string();
+    let path = Path::new(&csv_file);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect(&"Could not create folders".red());
     }
-
-    let file = File::create(csv_file).expect(&"Could not create CSV file".red());
+    let file = File::create(path).expect(&"Could not create CSV file".red());
     let mut writer = BufWriter::new(file);
 
-    for line in file_lines {
-        writeln!(writer, "{}", line).expect(&"Could not write to CSV file".red());
+    match format {
+        CsvFormat::CodeOwners => {
+            // Write headers
+            writeln!(writer, "login,user_or_team,email")
+                .expect(&"Could not write to CSV file".red());
+
+            // Write users
+            for u in users {
+                writeln!(
+                    writer,
+                    "{},User,{}",
+                    u.login,
+                    email_from_gh_username(&bootstrap, &u.login)
+                        .unwrap_or("Not available".to_string()),
+                )
+                .expect(&"Could not write to CSV file".red());
+            }
+
+            // Write teams
+            for t in teams {
+                writeln!(writer, "{},Team,None", t.slug,)
+                    .expect(&"Could not write to CSV file".red());
+            }
+        }
+        CsvFormat::Traditional => {
+            // Write headers
+            writeln!(writer, "login,user_or_team,email,permissions")
+                .expect(&"Could not write to CSV file".red());
+
+            // Write users
+            for u in users {
+                writeln!(
+                    writer,
+                    "{},User,{},{}",
+                    u.login,
+                    email_from_gh_username(&bootstrap, &u.login)
+                        .unwrap_or("Not available".to_string()),
+                    u.permissions.highest_perm()
+                )
+                .expect(&"Could not write to CSV file".red());
+            }
+
+            // Write teams
+            for t in teams {
+                writeln!(
+                    writer,
+                    "{},Team,None,{}",
+                    t.slug,
+                    t.permissions.as_ref().unwrap().highest_perm()
+                )
+                .expect(&"Could not write to CSV file".red());
+            }
+        }
     }
 
     println!(
         "{} {}",
-        "Data successfully exported to".green(),
+        "Successfully written file".green(),
+        csv_file.white()
+    );
+}
+
+/// Write to a CSV file all the access that teams have
+pub(crate) fn team_access_to_csv(
+    csv_file: impl Display,
+    teams_to_repos: &HashMap<String, HashSet<(String, Permissions)>>,
+) {
+    // Create file and all intermediate folders if necessary
+    let csv_file = csv_file.to_string();
+    let path = Path::new(&csv_file);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect(&"Could not create folders".red());
+    }
+    let file = File::create(path).expect(&"Could not create CSV file".red());
+    let mut writer = BufWriter::new(file);
+
+    // Write headers
+    writeln!(writer, "team,repo,permissions").expect(&"Could not write to CSV file".red());
+
+    for (team, access) in teams_to_repos {
+        for (repo, permissions) in access {
+            writeln!(writer, "{team},{repo},{}", permissions.highest_perm())
+                .expect(&"Could not write to CSV file".red());
+        }
+    }
+
+    println!(
+        "{} {}",
+        "Successfully written file".green(),
+        csv_file.white()
+    );
+}
+
+/// Write to a CSV file all the members of the teams we encountered
+pub(crate) fn team_members_to_csv(
+    bootstrap: &Bootstrap,
+    csv_file: impl Display,
+    teams_to_repos: &HashMap<String, HashSet<(String, Permissions)>>,
+) {
+    // Create file and all intermediate folders if necessary
+    let csv_file = csv_file.to_string();
+    let path = Path::new(&csv_file);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect(&"Could not create folders".red());
+    }
+    let file = File::create(path).expect(&"Could not create CSV file".red());
+    let mut writer = BufWriter::new(file);
+
+    // Write headers
+    writeln!(writer, "team,user,email").expect(&"Could not write to CSV file".red());
+
+    for (team, _) in teams_to_repos {
+        // A temporary team object just to be able to call the fetch_members method
+        let tmp_team = Team {
+            slug: team.to_string(),
+            name: team.to_string(),
+            permissions: None,
+        };
+        let members: Vec<String> = tmp_team
+            .fetch_team_members(bootstrap)
+            .unwrap()
+            .keys()
+            .map(|v| v.to_string())
+            .collect();
+
+        for user in &members {
+            writeln!(
+                writer,
+                "{team},{user},{}",
+                email_from_gh_username(bootstrap, user).unwrap_or("Not available".to_string())
+            )
+            .expect(&"Could not write to CSV file".red());
+        }
+    }
+
+    println!(
+        "{} {}",
+        "Successfully written file".green(),
         csv_file.white()
     );
 }
