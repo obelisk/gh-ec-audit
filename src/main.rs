@@ -71,6 +71,10 @@ struct Args {
     /// The previous run CSV file
     #[arg(short, long)]
     previous: Option<String>,
+
+    /// Increase verbosity
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 fn main() {
@@ -103,10 +107,16 @@ fn main() {
     } else if args.emptyteams {
         teams::run_empty_teams_audit(bootstrap);
     } else if args.codeowners {
-        codeowners::run_codeowners_audit(bootstrap, args.repos, args.search, args.also_gh_api);
+        codeowners::run_codeowners_audit(
+            bootstrap,
+            args.repos,
+            args.search,
+            args.also_gh_api,
+            args.verbose,
+        );
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {
-            codeowners::run_team_in_codeowners_audit(bootstrap, team, args.search);
+            codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);
         } else {
             println!("Please specify a team with --team");
         }

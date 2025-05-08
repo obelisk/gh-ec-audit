@@ -107,31 +107,20 @@ impl GitHubIndex for Team {
 impl Team {
     /// Return whether a team is empty, i.e., if the team has no members,
     /// including its sub-teams.
-    fn is_empty(&self, bootstrap: &Bootstrap) -> bool {
+    fn is_empty(&self, bootstrap: &Bootstrap) -> Result<bool, String> {
         // NOTE - We don't make a paginated request on purpose: we only want
         // to see if a team is empty or not, and we don't need to fetch _all_ members.
-        let members = match make_github_request(
+        let members = make_github_request(
             &bootstrap.token,
             &format!("/orgs/{}/teams/{}/members", bootstrap.org, self.slug),
             3,
             None,
-        ) {
-            Ok(members) => members,
-            Err(e) => {
-                panic!(
-                    "{} {}: {}",
-                    "I couldn't fetch the members of team".red(),
-                    self.name,
-                    e
-                );
-            }
-        };
-        let members = members.as_array().expect(&format!(
-            "{}",
-            "The value returned by GH is not an array".red()
-        ));
+        )?;
 
-        members.is_empty()
+        match members.as_array() {
+            Some(v) => Ok(v.is_empty()),
+            None => Err("The value returned by GitHub is not an array".to_string()),
+        }
     }
 }
 
@@ -414,43 +403,26 @@ impl Bootstrap {
 }
 
 /// Get collaborators for a given repository
-fn get_repo_collaborators(bootstrap: &Bootstrap, repo: &str) -> HashSet<Collaborator> {
-    let collaborators: HashSet<Collaborator> = match make_paginated_github_request(
+fn get_repo_collaborators(
+    bootstrap: &Bootstrap,
+    repo: &str,
+) -> Result<HashSet<Collaborator>, String> {
+    make_paginated_github_request(
         &bootstrap.token,
         25,
         &format!("/repos/{}/{}/collaborators", &bootstrap.org, repo),
         3,
         None,
-    ) {
-        Ok(collaborators) => collaborators,
-        Err(e) => {
-            panic!(
-                "{} {}: {e}",
-                repo.white(),
-                "I couldn't fetch the repository collaborators".red()
-            );
-        }
-    };
-    collaborators
+    )
 }
 
 /// Get the teams that have access to the repo
-fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> HashSet<Team> {
-    let repo_teams: HashSet<Team> = match make_paginated_github_request(
+fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> Result<HashSet<Team>, String> {
+    make_paginated_github_request(
         &bootstrap.token,
         25,
         &format!("/repos/{}/{}/teams", &bootstrap.org, repo),
         3,
         None,
-    ) {
-        Ok(t) => t,
-        Err(e) => {
-            panic!(
-                "{} {}: {e}",
-                repo.white(),
-                "I couldn't fetch teams with access to the repo".red()
-            );
-        }
-    };
-    repo_teams
+    )
 }

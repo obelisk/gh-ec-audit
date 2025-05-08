@@ -149,7 +149,18 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
     let mut ec_permissions = ExternalCollaboratorPermissions::new();
 
     for repository in repositories {
-        let collaborators = get_repo_collaborators(&bootstrap, &repository.name);
+        let collaborators = match get_repo_collaborators(&bootstrap, &repository.name) {
+            Ok(c) => c,
+            Err(_) => {
+                println!(
+                    "{} {} {}",
+                    "I couldn't fetch collaborators for repository".yellow(),
+                    repository.name.white(),
+                    ". I will continue with other repositories.".yellow()
+                );
+                continue;
+            }
+        };
 
         for collaborator in collaborators {
             if outside_collaborators.contains_key(&collaborator.login) {

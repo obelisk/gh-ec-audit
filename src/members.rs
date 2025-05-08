@@ -83,7 +83,18 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
 
     for repository in repositories {
         // Get the teams that have access to the repository
-        let repo_teams = get_repo_teams(&bootstrap, &repository.name);
+        let repo_teams = match get_repo_teams(&bootstrap, &repository.name) {
+            Ok(rt) => rt,
+            Err(_) => {
+                println!(
+                    "{} {} {}",
+                    "I couldn't fetch teams with access to repository".yellow(),
+                    repository.name.white(),
+                    ". I will continue with other repositories.".yellow()
+                );
+                continue;
+            }
+        };
 
         let repo_admin_teams = repo_teams
             .iter()

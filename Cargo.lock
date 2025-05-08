@@ -358,6 +358,7 @@ dependencies = [
  "clap",
  "colored",
  "csv",
+ "lazy_static",
  "regex",
  "reqwest",
  "serde",

@@ -100,7 +100,7 @@ pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
 
     // For each team, see if it's empty.
     for team in teams {
-        if team.is_empty(&bootstrap) {
+        if let Ok(true) = team.is_empty(&bootstrap) {
             // The team is empty: we want to see to how many repos it has access
             let team_repos = get_team_repos(&bootstrap, team.slug);
             println!(
@@ -110,6 +110,13 @@ pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
                 "This team has access to".yellow(),
                 team_repos.len().to_string().white(),
                 "repositories".yellow()
+            );
+        } else {
+            println!(
+                "{} {} {}",
+                "Warning! I could not determine if team".yellow(),
+                team.slug.white(),
+                "is empty. I will continue with other teams.".yellow()
             );
         }
     }
