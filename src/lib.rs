@@ -8,10 +8,12 @@ use std::{
 use colored::Colorize;
 
 pub mod bpr;
+pub mod codeowners;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
 pub mod teams;
+pub mod utils;
 
 pub trait GitHubIndex {
     fn index(&self) -> String;
@@ -33,9 +35,9 @@ pub struct Collaborator {
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-struct Member {
-    avatar_url: String,
-    login: String,
+pub struct Member {
+    pub avatar_url: String,
+    pub login: String,
 }
 
 impl GitHubIndex for Member {
@@ -93,6 +95,33 @@ pub struct Repository {
 pub struct Team {
     pub name: String,
     pub slug: String,
+    pub permissions: Option<Permissions>,
+}
+
+impl GitHubIndex for Team {
+    fn index(&self) -> String {
+        self.slug.clone()
+    }
+}
+
+impl Team {
+    /// Return whether a team is empty, i.e., if the team has no members,
+    /// including its sub-teams.
+    fn is_empty(&self, bootstrap: &Bootstrap) -> Result<bool, String> {
+        // NOTE - We don't make a paginated request on purpose: we only want
+        // to see if a team is empty or not, and we don't need to fetch _all_ members.
+        let members = make_github_request(
+            &bootstrap.token,
+            &format!("/orgs/{}/teams/{}/members", bootstrap.org, self.slug),
+            3,
+            None,
+        )?;
+
+        match members.as_array() {
+            Some(v) => Ok(v.is_empty()),
+            None => Err("The value returned by GitHub is not an array".to_string()),
+        }
+    }
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
@@ -371,4 +400,29 @@ impl Bootstrap {
 
         Ok(repositories)
     }
+}
+
+/// Get collaborators for a given repository
+fn get_repo_collaborators(
+    bootstrap: &Bootstrap,
+    repo: &str,
+) -> Result<HashSet<Collaborator>, String> {
+    make_paginated_github_request(
+        &bootstrap.token,
+        25,
+        &format!("/repos/{}/{}/collaborators", &bootstrap.org, repo),
+        3,
+        None,
+    )
+}
+
+/// Get the teams that have access to the repo
+fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> Result<HashSet<Team>, String> {
+    make_paginated_github_request(
+        &bootstrap.token,
+        25,
+        &format!("/repos/{}/{}/teams", &bootstrap.org, repo),
+        3,
+        None,
+    )
 }

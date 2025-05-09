@@ -3,36 +3,47 @@ use std::collections::{HashMap, HashSet};
 use colored::Colorize;
 
 use crate::{
-    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap,
-    Collaborator, Member, Permissions, Repository,
+    get_repo_teams, make_paginated_github_request, make_paginated_github_request_with_index,
+    Bootstrap, Collaborator, Member, Permissions, Repository, Team,
 };
 
-pub fn run_audit(bootstrap: Bootstrap) {
-    let members: HashSet<Member> = match make_paginated_github_request(
+pub fn get_org_members(bootstrap: &Bootstrap) -> HashSet<Member> {
+    match make_paginated_github_request(
         &bootstrap.token,
         100,
         &format!("/orgs/{}/members", &bootstrap.org),
         3,
         None,
     ) {
-        Ok(outside_collaborators) => outside_collaborators,
+        Ok(mem) => mem,
         Err(e) => {
             panic!("{}: {e}", "I couldn't fetch the organization members".red());
         }
-    };
+    }
+}
 
-    for member in members {
+pub fn get_indexed_org_members(bootstrap: &Bootstrap) -> HashMap<String, Member> {
+    match make_paginated_github_request_with_index(
+        &bootstrap.token,
+        100,
+        &format!("/orgs/{}/members", &bootstrap.org),
+        3,
+        None,
+    ) {
+        Ok(mem) => mem,
+        Err(e) => {
+            panic!("{}: {e}", "I couldn't fetch the organization members".red());
+        }
+    }
+}
+
+pub fn run_audit(bootstrap: Bootstrap) {
+    for member in get_org_members(&bootstrap) {
         println!("{}", member.avatar_url);
     }
 }
 
 pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
-    #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-    struct Team {
-        slug: String,
-        permissions: Permissions,
-    }
-
     let organization_admins: HashMap<String, Member> =
         match make_paginated_github_request_with_index(
             &bootstrap.token,
@@ -72,26 +83,22 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
 
     for repository in repositories {
         // Get the teams that have access to the repository
-        let repo_teams: HashSet<Team> = match make_paginated_github_request(
-            &bootstrap.token,
-            25,
-            &format!("/repos/{}/{}/teams", &bootstrap.org, repository.name),
-            3,
-            None,
-        ) {
-            Ok(t) => t,
-            Err(e) => {
-                panic!(
-                    "{} {}: {e}",
+        let repo_teams = match get_repo_teams(&bootstrap, &repository.name) {
+            Ok(rt) => rt,
+            Err(_) => {
+                println!(
+                    "{} {} {}",
+                    "I couldn't fetch teams with access to repository".yellow(),
                     repository.name.white(),
-                    "I couldn't fetch the repository collaborators".red()
+                    ". I will continue with other repositories.".yellow()
                 );
+                continue;
             }
         };
 
         let repo_admin_teams = repo_teams
             .iter()
-            .filter(|t| t.permissions.admin)
+            .filter(|t| t.permissions.as_ref().unwrap().admin)
             .collect::<Vec<&Team>>();
 
         for repo_admin_team in &repo_admin_teams {
