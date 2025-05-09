@@ -14,14 +14,7 @@ fn count_repos_security_property_enabled(
     repos
         .iter()
         .filter(|r| {
-            r.visibility == visibility
-                && !r.archived
-                && r.security_and_analysis
-                    .get(property)
-                    .and_then(|v| v.get("status"))
-                    .and_then(|st| st.as_str())
-                    .unwrap_or("")
-                    == "enabled"
+            r.visibility == visibility && !r.archived && r.is_security_property_enabled(property)
         })
         .count()
 }
@@ -36,21 +29,13 @@ fn get_repos_security_property_not_enabled(
     repos
         .iter()
         .filter_map(|r| {
-            if r.visibility != visibility || r.archived {
-                return None;
-            }
-            // If we are here, then the repo has the right visibility and not archived
-            if r.security_and_analysis
-                .get(property)
-                .and_then(|v| v.get("status"))
-                .and_then(|st| st.as_str())
-                .unwrap_or("")
-                == "enabled"
+            if r.visibility == visibility
+                && !r.archived
+                && !r.is_security_property_enabled(property)
             {
-                // The property is enabled, so we exclude this repo from the result
-                return None;
+                Some(r.name.clone())
             } else {
-                return Some(r.name.clone());
+                None
             }
         })
         .collect()
@@ -58,7 +43,10 @@ fn get_repos_security_property_not_enabled(
 
 /// Run the repos audit
 pub fn run_repos_audit(bootstrap: Bootstrap) {
-    let repos = bootstrap.fetch_all_repositories(75).unwrap();
+    let repos = bootstrap.fetch_all_repositories(75).expect(&format!(
+        "{}",
+        "I could not fetch the list of repositories. I am giving up.".red()
+    ));
 
     // Collect some numbers about the repos and the types
     let num_total = repos.len();
