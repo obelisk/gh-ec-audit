@@ -106,7 +106,7 @@ fn repos_uar(
             };
             repo_audit_to_csv(
                 &bootstrap,
-                format!("output/{folder}/{repo}"),
+                format!("output/{folder}/{repo}.csv"),
                 &users,
                 &teams,
                 format,
