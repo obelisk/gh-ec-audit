@@ -8,16 +8,23 @@ use std::{
 use colored::Colorize;
 
 pub mod bpr;
+pub mod codeowners;
 pub mod deploy_key;
 pub mod external_collaborator;
+pub mod gql_queries;
 pub mod members;
+pub mod repos;
 pub mod teams;
+pub mod uar;
+pub mod utils;
+
+const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 pub trait GitHubIndex {
     fn index(&self) -> String;
 }
 
-#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq, Clone)]
 pub struct Permissions {
     pull: bool,
     triage: bool,
@@ -33,9 +40,9 @@ pub struct Collaborator {
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
-struct Member {
-    avatar_url: String,
-    login: String,
+pub struct Member {
+    pub avatar_url: String,
+    pub login: String,
 }
 
 impl GitHubIndex for Member {
@@ -87,12 +94,67 @@ pub struct Repository {
     pub name: String,
     pub private: bool,
     pub permissions: Permissions,
+    pub archived: bool,
+    pub visibility: String,
+    // We leave this as a generic Value because its contents seem to change
+    // depending on some org-level settings (e.g., whether GHAS is enabled).
+    pub security_and_analysis: serde_json::Value,
+}
+
+impl Repository {
+    /// Returns whether a given security property is available and enabled.
+    fn is_security_property_enabled(&self, property: &str) -> bool {
+        self.security_and_analysis
+            .get(property)
+            .and_then(|v| v.get("status"))
+            .and_then(|st| st.as_str())
+            .unwrap_or("")
+            == "enabled"
+    }
 }
 
 #[derive(serde::Deserialize, Hash, Eq, PartialEq)]
 pub struct Team {
     pub name: String,
     pub slug: String,
+    pub permissions: Option<Permissions>,
+}
+
+impl GitHubIndex for Team {
+    fn index(&self) -> String {
+        self.slug.clone()
+    }
+}
+
+impl Team {
+    /// Return whether a team is empty, i.e., if the team has no members,
+    /// including its sub-teams.
+    fn is_empty(&self, bootstrap: &Bootstrap) -> Result<bool, String> {
+        // NOTE - We don't make a paginated request on purpose: we only want
+        // to see if a team is empty or not, and we don't need to fetch _all_ members.
+        let members = make_github_request(
+            &bootstrap.token,
+            &format!("/orgs/{}/teams/{}/members", bootstrap.org, self.slug),
+            3,
+            None,
+        )?;
+
+        match members.as_array() {
+            Some(v) => Ok(v.is_empty()),
+            None => Err("The value returned by GitHub is not an array".to_string()),
+        }
+    }
+
+    /// Fetch members of this team, including members of child teams
+    fn fetch_team_members(&self, bootstrap: &Bootstrap) -> Result<HashMap<String, Member>, String> {
+        make_paginated_github_request_with_index(
+            &bootstrap.token,
+            25,
+            &format!("/orgs/{}/teams/{}/members", &bootstrap.org, self.slug),
+            3,
+            None,
+        )
+    }
 }
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
@@ -371,4 +433,123 @@ impl Bootstrap {
 
         Ok(repositories)
     }
+}
+
+/// Get collaborators for a given repository
+fn get_repo_collaborators(
+    bootstrap: &Bootstrap,
+    repo: &str,
+) -> Result<HashSet<Collaborator>, String> {
+    make_paginated_github_request(
+        &bootstrap.token,
+        25,
+        &format!("/repos/{}/{}/collaborators", &bootstrap.org, repo),
+        3,
+        None,
+    )
+}
+
+/// Get the teams that have access to the repo
+fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> Result<HashSet<Team>, String> {
+    make_paginated_github_request(
+        &bootstrap.token,
+        25,
+        &format!("/repos/{}/{}/teams", &bootstrap.org, repo),
+        3,
+        None,
+    )
+}
+
+#[derive(serde::Serialize)]
+pub struct GraphQLQuery {
+    query: String,
+    variables: HashMap<String, String>,
+}
+
+/// Make a GraphQL query on GitHub
+fn make_graphql_query(
+    gh_token: &str,
+    query: GraphQLQuery,
+    retries: u8,
+) -> Result<serde_json::Value, String> {
+    let query = serde_json::to_string(&query).unwrap();
+
+    let mut tries = 0;
+    loop {
+        tries += 1;
+        let response = reqwest::blocking::Client::new()
+            .post(GRAPHQL_URL)
+            .header("User-Agent", "GitHub EC Audit")
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("Authorization", format!("Bearer {}", gh_token))
+            .body(query.clone())
+            .send()
+            .map(|response| response.text());
+
+        // Handle communication issues with GitHub
+        let content = match response {
+            Ok(Ok(content)) => content,
+            Ok(Err(e)) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't read response from GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+            Err(e) => {
+                if tries >= retries {
+                    println!("{}", "Retries exhausted".red());
+                    return Err(e.to_string());
+                }
+
+                println!(
+                    "{}: {}",
+                    "Going to retry because couldn't make request to GitHub:".yellow(),
+                    e.to_string().red()
+                );
+
+                continue;
+            }
+        };
+
+        let value = serde_json::from_str::<serde_json::Value>(&content)
+            .map_err(|e| format!("Could not deserialize GitHub's response. Error: {e}"))?;
+
+        // break the loop and return the value we got
+        return Ok(value);
+    }
+}
+
+/// Get the email address associated to a username, if available, through the configured SAML IdP.
+fn email_from_gh_username(bootstrap: &Bootstrap, user: impl Display) -> Option<String> {
+    let q = GraphQLQuery {
+        query: crate::gql_queries::USER2EMAIL.to_string(),
+        variables: [
+            ("org".to_string(), bootstrap.org.clone()),
+            ("user".to_string(), user.to_string()),
+        ]
+        .into(),
+    };
+    make_graphql_query(&bootstrap.token, q, 3)
+        .ok()?
+        .get("data")
+        .and_then(|v| v.get("organization"))
+        .and_then(|v| v.get("samlIdentityProvider"))
+        .and_then(|v| v.get("externalIdentities"))
+        .and_then(|v| v.get("edges"))
+        .and_then(|v| v.as_array())
+        .and_then(|v| v.get(0))
+        .and_then(|v| v.get("node"))
+        .and_then(|v| v.get("samlIdentity"))
+        .and_then(|v| v.get("nameId"))
+        .and_then(|v| v.as_str())
+        .and_then(|v| Some(v.to_string()))
 }
