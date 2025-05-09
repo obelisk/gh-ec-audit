@@ -101,6 +101,18 @@ pub struct Repository {
     pub security_and_analysis: serde_json::Value,
 }
 
+impl Repository {
+    /// Returns whether a given security property is available and enabled.
+    fn is_security_property_enabled(&self, property: &str) -> bool {
+        self.security_and_analysis
+            .get(property)
+            .and_then(|v| v.get("status"))
+            .and_then(|st| st.as_str())
+            .unwrap_or("")
+            == "enabled"
+    }
+}
+
 #[derive(serde::Deserialize, Hash, Eq, PartialEq)]
 pub struct Team {
     pub name: String,
