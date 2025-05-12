@@ -98,7 +98,7 @@ pub(crate) fn repo_audit_to_csv(
 /// Write to a CSV file all the access that teams have
 pub(crate) fn team_access_to_csv(
     csv_file: impl Display,
-    teams_to_repos: &HashMap<String, HashSet<(String, Permissions)>>,
+    teams_to_repos: &HashMap<String, HashSet<(String, Option<Permissions>)>>,
 ) {
     // Create file and all intermediate folders if necessary
     let csv_file = csv_file.to_string();
@@ -114,8 +114,14 @@ pub(crate) fn team_access_to_csv(
 
     for (team, access) in teams_to_repos {
         for (repo, permissions) in access {
-            writeln!(writer, "{team},{repo},{}", permissions.highest_perm())
-                .expect(&"Could not write to CSV file".red());
+            // If we found this team during a traditional UAR, then we will
+            // have its permissions, otherwise it means we encountered it
+            // during a CODEOWNERS UAR, and we set it simply to "Codeowner"
+            let p = match permissions {
+                Some(p) => p.highest_perm(),
+                None => "Codeowner".to_string(),
+            };
+            writeln!(writer, "{team},{repo},{}", p).expect(&"Could not write to CSV file".red());
         }
     }
 
@@ -130,7 +136,7 @@ pub(crate) fn team_access_to_csv(
 pub(crate) fn team_members_to_csv(
     bootstrap: &Bootstrap,
     csv_file: impl Display,
-    teams_to_repos: &HashMap<String, HashSet<(String, Permissions)>>,
+    teams_to_repos: &HashMap<String, HashSet<(String, Option<Permissions>)>>,
 ) {
     // Create file and all intermediate folders if necessary
     let csv_file = csv_file.to_string();

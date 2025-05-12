@@ -6,7 +6,9 @@ use colored::Colorize;
 
 use crate::{
     codeowners::{iterate::get_co_file, CodeownersFile},
-    get_repo_collaborators, get_repo_teams, Bootstrap, Collaborator, Permissions, Team,
+    get_repo_collaborators, get_repo_teams,
+    teams::get_indexed_org_teams,
+    Bootstrap, Collaborator, Permissions, Team,
 };
 
 /// Permissions for all users and teams involved in the UAR
@@ -14,7 +16,7 @@ struct UarPermissions {
     /// { user --> (repo, permissions) }
     user_repo_permissions: HashMap<String, HashSet<(String, Permissions)>>,
     /// { team --> (repo, permissions) }
-    team_repo_permissions: HashMap<String, HashSet<(String, Permissions)>>,
+    team_repo_permissions: HashMap<String, HashSet<(String, Option<Permissions>)>>,
 }
 
 /// All the actors (users and teams) mentioned in a CODEOWNERS file or that have access to a repo
@@ -69,6 +71,9 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
     let mut users_to_repos = HashMap::new();
     let mut teams_to_repos = HashMap::new();
 
+    // Get all the members and teams in the org: it will be used for the CO audit
+    let org_teams = get_indexed_org_teams(bootstrap);
+
     for repo in repos {
         // Find all the users and teams that have access to this repo.
         // If we have a CODEOWNERS file, we focus on that one, otherwise
@@ -83,7 +88,7 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
                     repo.white(),
                     ": using that for the UAR".green()
                 );
-                (co_uar(&bootstrap, &repo, co_file), true)
+                (co_uar(&bootstrap, &repo, co_file, &org_teams), true)
             } else {
                 // No CODEOWNERS file found: proceed with traditional UAR
                 println!(
@@ -111,7 +116,7 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
                 teams_to_repos
                     .entry(t.slug.clone())
                     .or_insert_with(HashSet::new)
-                    .insert((repo.clone(), t.permissions.clone().unwrap()));
+                    .insert((repo.clone(), t.permissions.clone()));
             }
 
             if csv {
@@ -156,7 +161,7 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
 /// Gather information about teams and team membership
 fn teams_uar(
     bootstrap: &Bootstrap,
-    teams_to_repos: &HashMap<String, HashSet<(String, Permissions)>>,
+    teams_to_repos: &HashMap<String, HashSet<(String, Option<Permissions>)>>,
     csv: bool,
 ) {
     if csv {
@@ -174,12 +179,19 @@ fn teams_uar(
         for (team, repos_with_perms) in teams_to_repos {
             println!("{} {}", "Team name:".green(), team.white());
             for (repo, perms) in repos_with_perms {
+                // If we found this team during a traditional UAR, then we will
+                // have its permissions, otherwise it means we encountered it
+                // during a CODEOWNERS UAR, and we set it simply to "Codeowner"
+                let p = match perms {
+                    Some(p) => p.highest_perm(),
+                    None => "Codeowner".to_string(),
+                };
                 println!(
                     "\t{} {}, {} {}",
                     "Repository".green(),
                     repo.white(),
                     "Permissions".green(),
-                    perms.highest_perm().white()
+                    p.white()
                 );
             }
         }
@@ -215,21 +227,27 @@ fn co_uar(
     bootstrap: &Bootstrap,
     repo: &str,
     co_file: CodeownersFile,
+    org_teams: &HashMap<String, Team>,
 ) -> Result<UarUsersAndTeams, String> {
-    // Get all users and teams that have access to this repo.
+    // Get all users that have access to this repo.
     // Then we will filter and keep only those that appear in the CO file.
     let users = get_repo_collaborators(bootstrap, repo);
-    let teams = get_repo_teams(bootstrap, repo);
 
-    match (users, teams) {
-        (Ok(users), Ok(teams)) => {
+    match users {
+        Ok(users) => {
             let filtered_users = users
                 .into_iter()
                 .filter(|u| co_file.users.contains(&u.login))
                 .collect();
-            let filtered_teams = teams
-                .into_iter()
-                .filter(|t| co_file.teams.contains(&t.slug))
+            let filtered_teams = org_teams
+                .iter()
+                .filter_map(|(slug, t)| {
+                    if co_file.teams.contains(slug) {
+                        Some(t.clone())
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             Ok(UarUsersAndTeams {
                 collaborators: filtered_users,
