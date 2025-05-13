@@ -89,6 +89,10 @@ struct Args {
     /// Increase verbosity
     #[arg(short, long)]
     verbose: bool,
+
+    /// Produce a zip archive with the result (only for specific audits)
+    #[arg(long)]
+    zip: Option<String>,
 }
 
 fn main() {
@@ -137,8 +141,11 @@ fn main() {
     } else if args.org_repos {
         repos::run_repos_audit(bootstrap);
     } else if args.uar {
+        if args.zip.is_some() && !args.csv {
+            panic!("You cannot produce a zip archive if you are not generating CSV files")
+        }
         if let Some(repos) = args.repos {
-            uar::run_uar_audit(bootstrap, repos, args.csv);
+            uar::run_uar_audit(bootstrap, repos, args.csv, args.zip);
         } else {
             println!("Please specify a list of repos with --repos");
         }

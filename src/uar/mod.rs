@@ -1,4 +1,5 @@
 mod csv;
+mod zip;
 
 use std::collections::{HashMap, HashSet};
 
@@ -10,6 +11,9 @@ use crate::{
     teams::get_indexed_org_teams,
     Bootstrap, Collaborator, Permissions, Team,
 };
+
+/// The folder where we will write output files
+const OUTPUT_FOLDER: &str = "output";
 
 /// Permissions for all users and teams involved in the UAR
 struct UarPermissions {
@@ -33,7 +37,7 @@ struct UarUsersAndTeams {
 /// to the repo and with which permissions.
 ///
 /// Finally, dump all members of all teams we have encountered.
-pub fn run_uar_audit(bootstrap: Bootstrap, repos: Vec<String>, csv: bool) {
+pub fn run_uar_audit(bootstrap: Bootstrap, repos: Vec<String>, csv: bool, zip: Option<String>) {
     println!("{}", "Performing the UAR on the given repos...".yellow());
     let UarPermissions {
         user_repo_permissions,
@@ -60,6 +64,14 @@ pub fn run_uar_audit(bootstrap: Bootstrap, repos: Vec<String>, csv: bool) {
                     perms.highest_perm().white()
                 );
             }
+        }
+    }
+
+    if let Some(output_zip) = zip {
+        // zip assumes csv, otherwise we would have panicked immediately, so we know CSV files have been produced
+        match zip::zip_dir_recursive(OUTPUT_FOLDER, &output_zip) {
+            Ok(hash) => println!("SHA256 hash of '{}': {}", output_zip, hash),
+            Err(e) => eprintln!("Error: {}", e),
         }
     }
 }
@@ -129,7 +141,7 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
                 };
                 csv::repo_audit_to_csv(
                     &bootstrap,
-                    format!("output/{folder}/{repo}.csv"),
+                    format!("{OUTPUT_FOLDER}/{folder}/{repo}.csv"),
                     &collaborators,
                     &teams,
                     format,
@@ -166,11 +178,11 @@ fn teams_uar(
 ) {
     if csv {
         // Write to CSV the access that teams have
-        csv::team_access_to_csv(format!("output/teams_access.csv"), &teams_to_repos);
+        csv::team_access_to_csv(format!("{OUTPUT_FOLDER}/teams_access.csv"), &teams_to_repos);
         // Write to CSV all the members of the teams
         csv::team_members_to_csv(
             &bootstrap,
-            format!("output/teams_membership.csv"),
+            format!("{OUTPUT_FOLDER}/teams_membership.csv"),
             &teams_to_repos,
         );
     } else {

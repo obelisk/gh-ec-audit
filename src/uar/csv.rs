@@ -33,6 +33,8 @@ pub(crate) fn repo_audit_to_csv(
     let file = File::create(path).expect(&"Could not create CSV file".red());
     let mut writer = BufWriter::new(file);
 
+    let mut count_entries = 0;
+
     match format {
         CsvFormat::CodeOwners => {
             // Write headers
@@ -49,12 +51,14 @@ pub(crate) fn repo_audit_to_csv(
                         .unwrap_or("Not available".to_string()),
                 )
                 .expect(&"Could not write to CSV file".red());
+                count_entries += 1;
             }
 
             // Write teams
             for t in teams {
                 writeln!(writer, "{},Team,None", t.slug,)
                     .expect(&"Could not write to CSV file".red());
+                count_entries += 1;
             }
         }
         CsvFormat::Traditional => {
@@ -73,6 +77,7 @@ pub(crate) fn repo_audit_to_csv(
                     u.permissions.highest_perm()
                 )
                 .expect(&"Could not write to CSV file".red());
+                count_entries += 1;
             }
 
             // Write teams
@@ -84,14 +89,18 @@ pub(crate) fn repo_audit_to_csv(
                     t.permissions.as_ref().unwrap().highest_perm()
                 )
                 .expect(&"Could not write to CSV file".red());
+                count_entries += 1;
             }
         }
     }
 
     println!(
-        "{} {}",
+        "{} {}: {} {} {}",
         "Successfully written file".green(),
-        csv_file.white()
+        csv_file.white(),
+        "There were".green(),
+        count_entries.to_string().white(),
+        "entries".green()
     );
 }
 
@@ -112,6 +121,8 @@ pub(crate) fn team_access_to_csv(
     // Write headers
     writeln!(writer, "team,repo,permissions").expect(&"Could not write to CSV file".red());
 
+    let mut count_entries = 0;
+
     for (team, access) in teams_to_repos {
         for (repo, permissions) in access {
             // If we found this team during a traditional UAR, then we will
@@ -122,13 +133,17 @@ pub(crate) fn team_access_to_csv(
                 None => "Codeowner".to_string(),
             };
             writeln!(writer, "{team},{repo},{}", p).expect(&"Could not write to CSV file".red());
+            count_entries += 1;
         }
     }
 
     println!(
-        "{} {}",
+        "{} {}: {} {} {}",
         "Successfully written file".green(),
-        csv_file.white()
+        csv_file.white(),
+        "There were".green(),
+        count_entries.to_string().white(),
+        "entries".green()
     );
 }
 
@@ -149,6 +164,8 @@ pub(crate) fn team_members_to_csv(
 
     // Write headers
     writeln!(writer, "team,user,email").expect(&"Could not write to CSV file".red());
+
+    let mut count_entries = 0;
 
     for (team, _) in teams_to_repos {
         // A temporary team object just to be able to call the fetch_members method
@@ -171,12 +188,16 @@ pub(crate) fn team_members_to_csv(
                 email_from_gh_username(bootstrap, user).unwrap_or("Not available".to_string())
             )
             .expect(&"Could not write to CSV file".red());
+            count_entries += 1;
         }
     }
 
     println!(
-        "{} {}",
+        "{} {}: {} {} {}",
         "Successfully written file".green(),
-        csv_file.white()
+        csv_file.white(),
+        "There were".green(),
+        count_entries.to_string().white(),
+        "entries".green()
     );
 }
