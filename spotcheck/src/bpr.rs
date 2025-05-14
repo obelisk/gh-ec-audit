@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use colored::Colorize;
 
-use crate::{make_github_request, Bootstrap};
+use crate::{utils::make_github_request, Bootstrap};
 
 fn get_default_branch(bootstrap: &Bootstrap, repo: impl Display) -> String {
     match make_github_request(

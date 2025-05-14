@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use colored::Colorize;
 
 use crate::{
-    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap, Member,
+    utils::{make_paginated_github_request, make_paginated_github_request_with_index}, Bootstrap, members::Member,
     Repository,
 };
 

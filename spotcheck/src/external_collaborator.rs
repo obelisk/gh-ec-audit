@@ -6,7 +6,7 @@ use std::{
 use colored::Colorize;
 
 use crate::{
-    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap,
+    utils::{make_paginated_github_request, make_paginated_github_request_with_index}, Bootstrap,
     Collaborator, GitHubIndex, Repository,
 };
 

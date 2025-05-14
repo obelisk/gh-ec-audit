@@ -1,0 +1,8 @@
+[package]
+name = "ghvhs"
+description = "Records the permission state of a GitHub organization for later review."
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+spotcheck = { path = "../spotcheck" }

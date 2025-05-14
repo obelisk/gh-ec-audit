@@ -1,12 +1,12 @@
 use colored::Colorize;
-use gh_ec_audit::bpr;
-use gh_ec_audit::deploy_key;
-use gh_ec_audit::external_collaborator;
+use spotcheck::bpr;
+use spotcheck::deploy_key;
+use spotcheck::external_collaborator;
 
 use clap::{command, Parser};
-use gh_ec_audit::members;
-use gh_ec_audit::teams;
-use gh_ec_audit::Bootstrap;
+use spotcheck::members;
+use spotcheck::teams;
+use spotcheck::Bootstrap;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -71,9 +71,18 @@ fn main() {
     } else if args.dk {
         deploy_key::run_audit(bootstrap, args.previous, args.all);
     } else if args.mem {
-        members::run_audit(bootstrap);
+        match members::audits::run_total_member_audit(&bootstrap) {
+            Ok(members) => {
+                for member in members {
+                    println!("{}", member.avatar_url);
+                }
+            }
+            Err(e) => {
+                println!("{}: {}", "I couldn't fetch the organization members".red(), e);
+            }
+        }
     } else if args.admin {
-        members::run_admin_audit(bootstrap, args.repos);
+        members::audits::run_admin_audit(&bootstrap, args.repos);
     } else if args.bpr {
         bpr::run_audit(bootstrap, args.repos);
     } else if args.teamperm {

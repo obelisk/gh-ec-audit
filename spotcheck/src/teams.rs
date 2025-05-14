@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use colored::Colorize;
 
-use crate::{make_github_request, make_paginated_github_request, Bootstrap, Repository, Team};
+use crate::{utils::{make_github_request, make_paginated_github_request}, Bootstrap, Repository, Team};
 
 /// Returns the repos that a team has access to
 fn get_team_repos(bootstrap: &Bootstrap, team: String) -> HashSet<Repository> {

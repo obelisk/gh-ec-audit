@@ -336,15 +336,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gh-ec-audit"
+name = "ghvhs"
 version = "0.1.0"
 dependencies = [
- "clap",
- "colored",
- "csv",
- "reqwest",
- "serde",
- "serde_json",
+ "spotcheck",
 ]
 
 [[package]]
@@ -856,6 +851,18 @@ checksum = "ce305eb0b4296696835b71df73eb912e0f1ffd2556a501fcede6e0c50349191c"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "spotcheck"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "colored",
+ "csv",
+ "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

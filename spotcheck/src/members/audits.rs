@@ -1,32 +1,35 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use colored::Colorize;
 
 use crate::{
-    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap,
-    Collaborator, Member, Permissions, Repository,
+    utils::{make_paginated_github_request, make_paginated_github_request_with_index}, Bootstrap,
+    Collaborator, Permissions, Repository,
 };
 
-pub fn run_audit(bootstrap: Bootstrap) {
-    let members: HashSet<Member> = match make_paginated_github_request(
+use super::Member;
+
+pub fn run_total_member_audit(bootstrap: &Bootstrap) -> Result<HashSet<Member>, String> {
+    make_paginated_github_request(
         &bootstrap.token,
         100,
         &format!("/orgs/{}/members", &bootstrap.org),
         3,
         None,
-    ) {
-        Ok(outside_collaborators) => outside_collaborators,
-        Err(e) => {
-            panic!("{}: {e}", "I couldn't fetch the organization members".red());
-        }
-    };
-
-    for member in members {
-        println!("{}", member.avatar_url);
-    }
+    )
 }
 
-pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
+pub fn run_organization_admin_audit(bootstrap: &Bootstrap) -> Result<HashSet<Member>, String> {
+    make_paginated_github_request(
+        &bootstrap.token,
+        75,
+        &format!("/orgs/{}/members", &bootstrap.org),
+        3,
+        Some("role=admin"),
+    )
+}
+
+pub fn run_admin_audit(bootstrap: &Bootstrap, repos: Option<Vec<String>>) {
     #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
     struct Team {
         slug: String,
