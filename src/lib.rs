@@ -7,6 +7,7 @@ use std::{
 
 use colored::Colorize;
 
+pub mod alerts;
 pub mod bpr;
 pub mod codeowners;
 pub mod deploy_key;
@@ -458,6 +459,20 @@ fn get_repo_teams(bootstrap: &Bootstrap, repo: &str) -> Result<HashSet<Team>, St
         3,
         None,
     )
+}
+
+/// Get the visibility of a repository, given its name
+fn get_repo_visibility(bootstrap: &Bootstrap, repo: &str) -> Result<String, String> {
+    let res = make_github_request(
+        &bootstrap.token,
+        &format!("/repos/{}/{repo}", bootstrap.org),
+        3,
+        None,
+    )?;
+    res.get("visibility")
+        .and_then(|v| v.as_str())
+        .and_then(|v| Some(v.to_string()))
+        .ok_or("Missing visibility in the response from GitHub".to_string())
 }
 
 #[derive(serde::Serialize)]
