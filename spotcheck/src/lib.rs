@@ -1,6 +1,4 @@
-use std::{
-    collections::HashSet,
-};
+use std::collections::HashSet;
 
 use colored::Colorize;
 
@@ -30,7 +28,6 @@ pub struct Collaborator {
     permissions: Permissions,
 }
 
-
 impl Permissions {
     fn highest_perm(&self) -> String {
         if self.admin {
@@ -59,15 +56,9 @@ pub struct Repository {
     pub permissions: Permissions,
 }
 
-#[derive(serde::Deserialize, Hash, Eq, PartialEq)]
-pub struct Team {
-    pub name: String,
-    pub slug: String,
-}
-
 pub struct Bootstrap {
-    token: String,
-    org: String,
+    pub token: String,
+    pub org: String,
 }
 
 impl Bootstrap {

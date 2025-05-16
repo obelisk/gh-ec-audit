@@ -78,7 +78,11 @@ fn main() {
                 }
             }
             Err(e) => {
-                println!("{}: {}", "I couldn't fetch the organization members".red(), e);
+                println!(
+                    "{}: {}",
+                    "I couldn't fetch the organization members".red(),
+                    e
+                );
             }
         }
     } else if args.admin {
@@ -87,12 +91,12 @@ fn main() {
         bpr::run_audit(bootstrap, args.repos);
     } else if args.teamperm {
         if let Some(team) = args.team {
-            teams::run_team_repo_audit(bootstrap, team);
+            teams::audits::run_team_repo_audit(bootstrap, team);
         } else {
             println!("Please specify a team with --team");
         }
     } else if args.emptyteams {
-        teams::run_empty_teams_audit(bootstrap);
+        teams::audits::run_empty_teams_audit(bootstrap);
     } else {
         println!("No command specified");
     }
