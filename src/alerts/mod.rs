@@ -216,6 +216,12 @@ pub fn run_alerts_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>, csv: b
             );
             writeln!(writer, "{}", line).expect(&"Could not write to CSV file".red());
         }
+
+        println!(
+            "{} {}",
+            "Successfully written file".green(),
+            csv_file.white()
+        );
     } else {
         for repo_alert in repo_alerts {
             println!(
