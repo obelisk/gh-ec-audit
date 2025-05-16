@@ -6,8 +6,8 @@ use std::{
 use colored::Colorize;
 
 use crate::{
-    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap,
-    Collaborator, GitHubIndex, Repository,
+    get_repo_collaborators, make_paginated_github_request_with_index, Bootstrap, GitHubIndex,
+    Repository,
 };
 
 pub type ExternalCollaboratorPermissions =
@@ -149,23 +149,16 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
     let mut ec_permissions = ExternalCollaboratorPermissions::new();
 
     for repository in repositories {
-        let collaborators: HashSet<Collaborator> = match make_paginated_github_request(
-            &bootstrap.token,
-            25,
-            &format!(
-                "/repos/{}/{}/collaborators",
-                &bootstrap.org, repository.name
-            ),
-            3,
-            None,
-        ) {
-            Ok(collaborators) => collaborators,
-            Err(e) => {
-                panic!(
-                    "{} {}: {e}",
+        let collaborators = match get_repo_collaborators(&bootstrap, &repository.name) {
+            Ok(c) => c,
+            Err(_) => {
+                println!(
+                    "{} {} {}",
+                    "I couldn't fetch collaborators for repository".yellow(),
                     repository.name.white(),
-                    "I couldn't fetch the repository collaborators".red()
+                    ". I will continue with other repositories.".yellow()
                 );
+                continue;
             }
         };
 

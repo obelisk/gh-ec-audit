@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use colored::Colorize;
 
-use crate::{make_github_request, make_paginated_github_request, Bootstrap, Repository, Team};
+use crate::{
+    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap, Repository,
+    Team,
+};
 
 /// Returns the repos that a team has access to
 fn get_team_repos(bootstrap: &Bootstrap, team: String) -> HashSet<Repository> {
@@ -41,14 +44,9 @@ pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
     }
 }
 
-/// Fetch all empty teams, i.e., teams with no members
-pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
-    println!(
-        "{}",
-        "I am going to fetch all teams from the org...".yellow()
-    );
-    // Get a list of all teams in the org
-    let teams: HashSet<Team> = match make_paginated_github_request(
+/// Get a list of all teams in the org
+pub fn get_org_teams(bootstrap: &Bootstrap) -> HashSet<Team> {
+    match make_paginated_github_request(
         &bootstrap.token,
         25,
         &format!("/orgs/{}/teams", &bootstrap.org),
@@ -62,7 +60,36 @@ pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
                 "I couldn't fetch the list of teams in the org".red()
             );
         }
-    };
+    }
+}
+
+/// Get a list of all teams in the org, indexed by the team slug
+pub fn get_indexed_org_teams(bootstrap: &Bootstrap) -> HashMap<String, Team> {
+    match make_paginated_github_request_with_index(
+        &bootstrap.token,
+        25,
+        &format!("/orgs/{}/teams", &bootstrap.org),
+        3,
+        None,
+    ) {
+        Ok(t) => t,
+        Err(e) => {
+            panic!(
+                "{}: {e}",
+                "I couldn't fetch the list of teams in the org".red()
+            );
+        }
+    }
+}
+
+/// Fetch all empty teams, i.e., teams with no members
+pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
+    println!(
+        "{}",
+        "I am going to fetch all teams from the org...".yellow()
+    );
+    let teams = get_org_teams(&bootstrap);
+
     println!(
         "{} {} {}",
         "Done: I found".green(),
@@ -71,33 +98,9 @@ pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
     );
     println!("{}", "Now I will check for empty teams...".yellow());
 
-    // For each team, get a list of its members and see if it's empty.
-    // NOTE - We don't make a paginated request on purpose: we only want
-    // to see if a team is empty or not. As soon as we have some members,
-    // we want to move to the next team instead of fetching _all_ members.
+    // For each team, see if it's empty.
     for team in teams {
-        let members = match make_github_request(
-            &bootstrap.token,
-            &format!("/orgs/{}/teams/{}/members", bootstrap.org, team.slug),
-            3,
-            None,
-        ) {
-            Ok(members) => members,
-            Err(e) => {
-                panic!(
-                    "{} {}: {}",
-                    "I couldn't fetch the members of team".red(),
-                    team.name,
-                    e
-                );
-            }
-        };
-        let members = members.as_array().expect(&format!(
-            "{}",
-            "The value returned by GH is not an array".red()
-        ));
-
-        if members.is_empty() {
+        if let Ok(true) = team.is_empty(&bootstrap) {
             // The team is empty: we want to see to how many repos it has access
             let team_repos = get_team_repos(&bootstrap, team.slug);
             println!(
@@ -107,6 +110,13 @@ pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
                 "This team has access to".yellow(),
                 team_repos.len().to_string().white(),
                 "repositories".yellow()
+            );
+        } else {
+            println!(
+                "{} {} {}",
+                "Warning! I could not determine if team".yellow(),
+                team.slug.white(),
+                "is empty. I will continue with other teams.".yellow()
             );
         }
     }
