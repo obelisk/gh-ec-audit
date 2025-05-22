@@ -190,6 +190,9 @@ pub(crate) fn team_members_to_csv(
             .expect(&"Could not write to CSV file".red());
             count_entries += 1;
         }
+
+        // Print out the number of members in this team
+        println!("{team}: {} members", members.len());
     }
 
     println!(

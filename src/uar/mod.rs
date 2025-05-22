@@ -8,6 +8,7 @@ use colored::Colorize;
 use crate::{
     codeowners::{iterate::get_co_file, CodeownersFile},
     get_repo_collaborators, get_repo_teams,
+    members::get_org_admins,
     teams::get_indexed_org_teams,
     Bootstrap, Collaborator, Permissions, Team,
 };
@@ -86,6 +87,11 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
     // Get all the members and teams in the org: it will be used for the CO audit
     let org_teams = get_indexed_org_teams(bootstrap);
 
+    let org_admins: HashSet<String> = get_org_admins(bootstrap)
+        .iter()
+        .map(|(login, _member)| login.clone())
+        .collect();
+
     for repo in repos {
         // Find all the users and teams that have access to this repo.
         // If we have a CODEOWNERS file, we focus on that one, otherwise
@@ -109,7 +115,7 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
                     repo.white(),
                     ": proceeding with traditional UAR".yellow()
                 );
-                (traditional_uar(&bootstrap, &repo), false)
+                (traditional_uar(&bootstrap, &repo, &org_admins), false)
             };
 
         if let Ok(UarUsersAndTeams {
@@ -274,15 +280,26 @@ fn co_uar(
 }
 
 /// Extract in-scope collaborators and teams by looking at who has access to the repo.
-fn traditional_uar(bootstrap: &Bootstrap, repo: &str) -> Result<UarUsersAndTeams, String> {
+fn traditional_uar(
+    bootstrap: &Bootstrap,
+    repo: &str,
+    org_admins: &HashSet<String>,
+) -> Result<UarUsersAndTeams, String> {
     let users = get_repo_collaborators(bootstrap, repo);
     let teams = get_repo_teams(bootstrap, repo);
 
     match (users, teams) {
-        (Ok(users), Ok(teams)) => Ok(UarUsersAndTeams {
-            collaborators: users,
-            teams,
-        }),
+        (Ok(users), Ok(teams)) => {
+            // Filter out the members of org_admins
+            let users = users
+                .into_iter()
+                .filter(|c| !org_admins.contains(&c.login))
+                .collect();
+            Ok(UarUsersAndTeams {
+                collaborators: users,
+                teams,
+            })
+        }
         _ => Err(
             "Something went wrong while retrieving users and teams for traditional UAR".to_string(),
         ),

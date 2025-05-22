@@ -37,13 +37,7 @@ pub fn get_indexed_org_members(bootstrap: &Bootstrap) -> HashMap<String, Member>
     }
 }
 
-pub fn run_audit(bootstrap: Bootstrap) {
-    for member in get_org_members(&bootstrap) {
-        println!("{}", member.avatar_url);
-    }
-}
-
-pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
+pub fn get_org_admins(bootstrap: &Bootstrap) -> HashMap<String, Member> {
     let organization_admins: HashMap<String, Member> =
         match make_paginated_github_request_with_index(
             &bootstrap.token,
@@ -57,6 +51,17 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
                 panic!("{}: {e}", "I couldn't fetch the organization members".red());
             }
         };
+    organization_admins
+}
+
+pub fn run_audit(bootstrap: Bootstrap) {
+    for member in get_org_members(&bootstrap) {
+        println!("{}", member.avatar_url);
+    }
+}
+
+pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
+    let organization_admins = get_org_admins(&bootstrap);
 
     let repositories = repos.unwrap_or_else(|| {
         bootstrap

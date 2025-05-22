@@ -34,7 +34,7 @@ pub struct Permissions {
     admin: bool,
 }
 
-#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
+#[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq, Clone)]
 pub struct Collaborator {
     login: String,
     permissions: Permissions,
