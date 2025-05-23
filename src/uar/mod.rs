@@ -7,7 +7,7 @@ use colored::Colorize;
 
 use crate::{
     codeowners::{iterate::get_co_file, CodeownersFile},
-    get_repo_collaborators, get_repo_teams,
+    email_from_gh_username, get_repo_collaborators, get_repo_teams,
     members::get_org_admins,
     teams::get_indexed_org_teams,
     Bootstrap, Collaborator, Permissions, Team,
@@ -92,6 +92,14 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
         .map(|(login, _member)| login.clone())
         .collect();
 
+    // Prepare vectors where we will collect all the lines to be written to CSV files, if we need to do so
+    let mut csv_lines_codeowners = vec![];
+    let mut csv_lines_traditional = vec![];
+
+    // Write CSV headers
+    csv_lines_codeowners.push("repository,login,user_or_team,email".to_string());
+    csv_lines_traditional.push("repository,login,user_or_team,email,permissions".to_string());
+
     for repo in repos {
         // Find all the users and teams that have access to this repo.
         // If we have a CODEOWNERS file, we focus on that one, otherwise
@@ -138,22 +146,44 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
             }
 
             if csv {
-                // Create a CSV file for this repo. The CSV goes into a specific folder,
-                // depending on whether we are using a CODEOWNERS file or not for the audit.
-                let (folder, format) = if using_codeowners {
-                    ("codeowners", csv::CsvFormat::CodeOwners)
+                if using_codeowners {
+                    // Write codeowners lines
+                    // Users
+                    for u in &collaborators {
+                        csv_lines_codeowners.push(format!(
+                            "{repo},{},User,{}",
+                            u.login,
+                            email_from_gh_username(&bootstrap, &u.login)
+                                .unwrap_or("Not available".to_string())
+                        ));
+                    }
+                    // Teams
+                    for t in &teams {
+                        csv_lines_codeowners.push(format!("{repo},{},Team,None", t.slug));
+                    }
                 } else {
-                    ("traditional", csv::CsvFormat::Traditional)
-                };
-                csv::repo_audit_to_csv(
-                    &bootstrap,
-                    format!("{OUTPUT_FOLDER}/{folder}/{repo}.csv"),
-                    &collaborators,
-                    &teams,
-                    format,
-                );
+                    // Write traditional lines
+                    // Users
+                    for u in &collaborators {
+                        csv_lines_traditional.push(format!(
+                            "{repo},{},User,{},{}",
+                            u.login,
+                            email_from_gh_username(&bootstrap, &u.login)
+                                .unwrap_or("Not available".to_string()),
+                            u.permissions.highest_perm()
+                        ));
+                    }
+                    // Teams
+                    for t in &teams {
+                        csv_lines_traditional.push(format!(
+                            "{repo},{},Team,None,{}",
+                            t.slug,
+                            t.permissions.as_ref().unwrap().highest_perm()
+                        ));
+                    }
+                }
             } else {
-                // Print out the access to this repo
+                // No CSV: print out the access to this repo
                 let repo_users: Vec<String> =
                     collaborators.iter().map(|c| c.login.clone()).collect();
                 let repo_teams: Vec<String> = teams.iter().map(|t| t.slug.clone()).collect();
@@ -168,6 +198,18 @@ fn repos_uar(bootstrap: &Bootstrap, repos: &[String], csv: bool) -> Result<UarPe
         } else {
             return Err(format!("Could not fetch users and teams for repo {repo}"));
         }
+    }
+
+    // We are done looping through the repos. If we need to produce CSV files, we do it now
+    if csv {
+        csv::repo_audit_to_csv(
+            format!("{OUTPUT_FOLDER}/codeowners_uar.csv"),
+            &csv_lines_codeowners,
+        );
+        csv::repo_audit_to_csv(
+            format!("{OUTPUT_FOLDER}/traditional_uar.csv"),
+            &csv_lines_traditional,
+        );
     }
 
     Ok(UarPermissions {

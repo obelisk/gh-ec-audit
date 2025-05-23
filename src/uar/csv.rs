@@ -8,22 +8,10 @@ use std::{
 
 use colored::Colorize;
 
-use crate::{email_from_gh_username, Bootstrap, Collaborator, Permissions, Team};
-
-/// Which format we are following when exporting data to CSV
-pub(crate) enum CsvFormat {
-    CodeOwners,
-    Traditional,
-}
+use crate::{email_from_gh_username, Bootstrap, Permissions, Team};
 
 /// Write to a CSV file the information we collected during a repo audit
-pub(crate) fn repo_audit_to_csv(
-    bootstrap: &Bootstrap,
-    csv_file: impl Display,
-    users: &HashSet<Collaborator>,
-    teams: &HashSet<Team>,
-    format: CsvFormat,
-) {
+pub(crate) fn repo_audit_to_csv(csv_file: impl Display, lines: &[String]) {
     // Create file and all intermediate folders if necessary
     let csv_file = csv_file.to_string();
     let path = Path::new(&csv_file);
@@ -35,63 +23,9 @@ pub(crate) fn repo_audit_to_csv(
 
     let mut count_entries = 0;
 
-    match format {
-        CsvFormat::CodeOwners => {
-            // Write headers
-            writeln!(writer, "login,user_or_team,email")
-                .expect(&"Could not write to CSV file".red());
-
-            // Write users
-            for u in users {
-                writeln!(
-                    writer,
-                    "{},User,{}",
-                    u.login,
-                    email_from_gh_username(&bootstrap, &u.login)
-                        .unwrap_or("Not available".to_string()),
-                )
-                .expect(&"Could not write to CSV file".red());
-                count_entries += 1;
-            }
-
-            // Write teams
-            for t in teams {
-                writeln!(writer, "{},Team,None", t.slug,)
-                    .expect(&"Could not write to CSV file".red());
-                count_entries += 1;
-            }
-        }
-        CsvFormat::Traditional => {
-            // Write headers
-            writeln!(writer, "login,user_or_team,email,permissions")
-                .expect(&"Could not write to CSV file".red());
-
-            // Write users
-            for u in users {
-                writeln!(
-                    writer,
-                    "{},User,{},{}",
-                    u.login,
-                    email_from_gh_username(&bootstrap, &u.login)
-                        .unwrap_or("Not available".to_string()),
-                    u.permissions.highest_perm()
-                )
-                .expect(&"Could not write to CSV file".red());
-                count_entries += 1;
-            }
-
-            // Write teams
-            for t in teams {
-                writeln!(
-                    writer,
-                    "{},Team,None,{}",
-                    t.slug,
-                    t.permissions.as_ref().unwrap().highest_perm()
-                )
-                .expect(&"Could not write to CSV file".red());
-                count_entries += 1;
-            }
-        }
+    for line in lines {
+        writeln!(writer, "{line}").expect(&"Could not write to CSV file".red());
+        count_entries += 1;
     }
 
     println!(
