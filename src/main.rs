@@ -1,5 +1,6 @@
 use colored::Colorize;
 use gh_ec_audit::bpr;
+use gh_ec_audit::compliance;
 use gh_ec_audit::deploy_key;
 use gh_ec_audit::external_collaborator;
 
@@ -43,6 +44,10 @@ struct Args {
     /// Run the CODEOWNERS audit
     #[arg(short, long)]
     codeowners: bool,
+
+    /// Run repository protection compliance scoring (0-7)
+    #[arg(long)]
+    comp: bool,
 
     /// Find occurrences of a team in CODEOWNERS files
     #[arg(long)]
@@ -114,6 +119,8 @@ fn main() {
             args.also_gh_api,
             args.verbose,
         );
+    } else if args.comp {
+        compliance::run_compliance_audit(bootstrap, args.repos);
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {
             codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);

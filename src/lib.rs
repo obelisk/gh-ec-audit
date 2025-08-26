@@ -9,6 +9,7 @@ use colored::Colorize;
 
 pub mod bpr;
 pub mod codeowners;
+pub mod compliance;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
