@@ -42,10 +42,7 @@ impl ProtectionChecks {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct RepoInfo {
-    default_branch: String,
-}
+// No RepoInfo struct needed; we read default_branch directly from the JSON
 
 #[derive(Debug, Deserialize)]
 struct BprResponse {
@@ -219,17 +216,44 @@ fn check_symbol(v: bool) -> String {
 }
 
 fn get_default_branch(bootstrap: &Bootstrap, repo: &str) -> Option<String> {
-    match make_github_request(
+    // Try repository metadata first
+    if let Ok(res) = make_github_request(
         &bootstrap.token,
         &format!("/repos/{}/{repo}", bootstrap.org),
         3,
         None,
     ) {
-        Ok(res) => res
-            .get("default_branch")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-        Err(_) => None,
+        if let Some(branch) = res.get("default_branch").and_then(|v| v.as_str()) {
+            return Some(branch.to_string());
+        }
+    }
+
+    // Fallbacks: probe common default branch names
+    if branch_exists(bootstrap, repo, "main") {
+        return Some("main".to_string());
+    }
+    if branch_exists(bootstrap, repo, "master") {
+        return Some("master".to_string());
+    }
+    None
+}
+
+fn branch_exists(bootstrap: &Bootstrap, repo: &str, branch: &str) -> bool {
+    match make_github_request(
+        &bootstrap.token,
+        &format!("/repos/{}/{repo}/branches/{branch}", bootstrap.org),
+        2,
+        None,
+    ) {
+        Ok(res) => {
+            // If GitHub returns an error payload, it often has a string "status" like "404"
+            if res.get("status").and_then(|v| v.as_str()) == Some("404") {
+                return false;
+            }
+            // Presence of a branch name indicates success
+            res.get("name").and_then(|v| v.as_str()).is_some()
+        }
+        Err(_) => false,
     }
 }
 
