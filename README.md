@@ -36,6 +36,27 @@ export GH_ORG="your-org"
 
 ### Install
 
+- Install Rust/cargo:
+
+- macOS (Homebrew):
+
+```bash
+brew install rustup-init
+rustup-init -y
+source "$HOME/.cargo/env"
+cargo --version
+```
+
+- macOS/Linux (rustup):
+
+```bash
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+source "$HOME/.cargo/env"
+cargo --version
+```
+
+- Note for macOS: If prompted for developer tools, run `xcode-select --install`.
+
 - From source (local checkout):
 
 ```bash
