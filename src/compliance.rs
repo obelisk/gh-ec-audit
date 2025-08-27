@@ -12,6 +12,7 @@ struct ProtectionChecks {
     disable_deletion: bool,
     require_signed_commits: bool,
     require_status_checks: bool,
+    codeowners_valid: bool,
 }
 
 impl ProtectionChecks {
@@ -36,6 +37,9 @@ impl ProtectionChecks {
             s += 1
         }
         if self.require_status_checks {
+            s += 1
+        }
+        if self.codeowners_valid {
             s += 1
         }
         s
@@ -182,6 +186,9 @@ pub fn run_compliance_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             }
         }
 
+        // 3) CODEOWNERS exists and is valid
+        checks.codeowners_valid = codeowners_exists_and_is_valid(&bootstrap, &repo).unwrap_or(false);
+
         print_report(&repo, &default_branch, checks);
     }
 }
@@ -193,18 +200,19 @@ fn print_report(repo: &str, branch: &str, checks: ProtectionChecks) {
         repo.white(),
         "Default branch:".yellow(),
         branch.white(),
-        "Score (0-7):".yellow(),
+        "Score (0-8):".yellow(),
         checks.score().to_string().white()
     );
     println!(
-        "  - PR requires one approval: {}\n  - PR: dismiss stale reviews: {}\n  - PR requires code owners approval: {}\n  - Force-push disabled: {}\n  - Deletion disabled: {}\n  - Require signed commits: {}\n  - Require status checks: {}\n",
+        "  - PR requires one approval: {}\n  - PR: dismiss stale reviews: {}\n  - PR requires code owners approval: {}\n  - Force-push disabled: {}\n  - Deletion disabled: {}\n  - Require signed commits: {}\n  - Require status checks: {}\n  - CODEOWNERS exists and is valid: {}\n",
         check_symbol(checks.pr_one_approval),
         check_symbol(checks.pr_dismiss_stale),
         check_symbol(checks.pr_require_code_owner),
         check_symbol(checks.disable_force_push),
         check_symbol(checks.disable_deletion),
         check_symbol(checks.require_signed_commits),
-        check_symbol(checks.require_status_checks)
+        check_symbol(checks.require_status_checks),
+        check_symbol(checks.codeowners_valid)
     );
 }
 
@@ -287,6 +295,21 @@ fn get_rules(
     ) {
         Ok(res) => serde_json::from_value::<Vec<RulesetRule>>(res).ok(),
         Err(_) => None,
+    }
+}
+
+// Return Ok(true) if CODEOWNERS exists and has zero errors; Ok(false) if present but invalid; Ok(false) if missing; Err on API error
+fn codeowners_exists_and_is_valid(bootstrap: &Bootstrap, repo: &str) -> Result<bool, String> {
+    let url = format!("/repos/{}/{repo}/codeowners/errors", bootstrap.org);
+    let res = make_github_request(&bootstrap.token, &url, 3, None)?;
+    match res.get("errors") {
+        None => Ok(false), // missing CODEOWNERS
+        Some(errors) => {
+            let arr = errors
+                .as_array()
+                .ok_or_else(|| "Unexpected response format for codeowners errors".to_string())?;
+            Ok(arr.is_empty())
+        }
     }
 }
 
