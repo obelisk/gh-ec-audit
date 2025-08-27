@@ -4,20 +4,33 @@ use serde::Deserialize;
 use crate::{make_github_request, Bootstrap};
 
 #[derive(Default, Debug, Clone, Copy)]
+/// Result of a single compliance check.
+/// - pass: the check is satisfied
+/// - no_access_403: unable to evaluate due to GitHub returning 403 for the resource
 struct Check {
+    /// Whether the check is satisfied
     pass: bool,
+    /// Whether the check could not be evaluated due to lack of access (HTTP 403)
     no_access_403: bool,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
 struct ProtectionChecks {
+    /// Pull requests require at least one approving review
     pr_one_approval: Check,
+    /// Stale reviews are dismissed when new commits are pushed to the PR
     pr_dismiss_stale: Check,
+    /// Pull requests require CODEOWNERS approval
     pr_require_code_owner: Check,
+    /// Force-pushes are disabled (non fast-forward enforced)
     disable_force_push: Check,
+    /// Deletion of the protected branch is disabled
     disable_deletion: Check,
+    /// Commits to the protected branch must be signed
     require_signed_commits: Check,
+    /// Required status checks are configured and must pass before merging
     require_status_checks: Check,
+    /// CODEOWNERS file exists and GitHub reports zero parsing/ownership errors
     codeowners_valid: Check,
 }
 
