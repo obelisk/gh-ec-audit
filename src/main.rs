@@ -45,9 +45,14 @@ struct Args {
     #[arg(short, long)]
     codeowners: bool,
 
-    /// Run repository protection compliance scoring (0-7)
+    /// Run repository protection compliance scoring (0-8).
+    /// Tip: to run for all repositories, omit --repos
     #[arg(long)]
     comp: bool,
+
+    /// Export compliance audit to a CSV file
+    #[arg(long, value_name = "FILE")]
+    comp_csv: Option<String>,
 
     /// Find occurrences of a team in CODEOWNERS files
     #[arg(long)]
@@ -69,7 +74,8 @@ struct Args {
     #[clap(long, default_value_t = false)]
     search: bool,
 
-    /// Limit the scanning to the given repos
+    /// Limit the scanning to the given repos.
+    /// Omit this flag to scan all repositories
     #[clap(short, long, value_delimiter = ',', num_args = 1..)]
     repos: Option<Vec<String>>,
 
@@ -119,8 +125,8 @@ fn main() {
             args.also_gh_api,
             args.verbose,
         );
-    } else if args.comp {
-        compliance::run_compliance_audit(bootstrap, args.repos);
+    } else if args.comp || args.comp_csv.is_some() {
+        compliance::run_compliance_audit(bootstrap, args.repos, args.comp_csv);
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {
             codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);
