@@ -308,12 +308,12 @@ fn print_report(repo: &str, branch: &str, checks: ProtectionChecks) {
 
 fn check_symbol(v: Check) -> String {
     if v.no_access_403 {
-        return "? (403)".yellow().to_string();
+        return "? (403)".to_string();
     }
     if v.pass {
-        return "✅".green().to_string();
+        return "✅".to_string();
     }
-    "❌".red().to_string()
+    "❌".to_string()
 }
 
 fn get_default_branch(bootstrap: &Bootstrap, repo: &str) -> Option<String> {
