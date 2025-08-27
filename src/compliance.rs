@@ -151,14 +151,26 @@ pub fn run_compliance_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
     });
 
     for repo in repos {
-        let Some(default_branch) = get_default_branch(&bootstrap, &repo) else {
-            println!(
-                "{} {}: {}",
-                "Skipping repo".yellow(),
-                repo.white(),
-                "could not determine default branch".red()
-            );
-            continue;
+        let default_branch = match get_default_branch(&bootstrap, &repo) {
+            DefaultBranchFetch::Ok(b) => b,
+            DefaultBranchFetch::NoAccess403 => {
+                println!(
+                    "{} {}: {}",
+                    "Skipping repo".yellow(),
+                    repo.white(),
+                    "default branch not accessible (403)".red()
+                );
+                continue;
+            }
+            DefaultBranchFetch::MissingOrError => {
+                println!(
+                    "{} {}: {}",
+                    "Skipping repo".yellow(),
+                    repo.white(),
+                    "could not determine default branch".red()
+                );
+                continue;
+            }
         };
         let mut checks = ProtectionChecks::default();
         let mut saw_403_bpr = false;
@@ -316,47 +328,35 @@ fn check_symbol(v: Check) -> String {
     "❌".to_string()
 }
 
-fn get_default_branch(bootstrap: &Bootstrap, repo: &str) -> Option<String> {
+enum DefaultBranchFetch {
+    Ok(String),
+    NoAccess403,
+    MissingOrError,
+}
+
+fn get_default_branch(bootstrap: &Bootstrap, repo: &str) -> DefaultBranchFetch {
     // Try repository metadata first
-    if let Ok(res) = make_github_request(
+    match make_github_request(
         &bootstrap.token,
         &format!("/repos/{}/{repo}", bootstrap.org),
         3,
         None,
     ) {
-        if let Some(branch) = res.get("default_branch").and_then(|v| v.as_str()) {
-            return Some(branch.to_string());
-        }
-    }
-
-    // Fallbacks: probe common default branch names
-    if branch_exists(bootstrap, repo, "main") {
-        return Some("main".to_string());
-    }
-    if branch_exists(bootstrap, repo, "master") {
-        return Some("master".to_string());
-    }
-    None
-}
-
-fn branch_exists(bootstrap: &Bootstrap, repo: &str, branch: &str) -> bool {
-    match make_github_request(
-        &bootstrap.token,
-        &format!("/repos/{}/{repo}/branches/{branch}", bootstrap.org),
-        2,
-        None,
-    ) {
         Ok(res) => {
-            // If GitHub returns an error payload, it often has a string "status" like "404"
-            if res.get("status").and_then(|v| v.as_str()) == Some("404") {
-                return false;
+            if res.get("status").and_then(|v| v.as_str()) == Some("403") {
+                return DefaultBranchFetch::NoAccess403;
             }
-            // Presence of a branch name indicates success
-            res.get("name").and_then(|v| v.as_str()).is_some()
+            if let Some(branch) = res.get("default_branch").and_then(|v| v.as_str()) {
+                return DefaultBranchFetch::Ok(branch.to_string());
+            }
         }
-        Err(_) => false,
+        Err(_) => {}
     }
+
+    DefaultBranchFetch::MissingOrError
 }
+
+ 
 
 enum BprFetch {
     Ok(BprResponse),
