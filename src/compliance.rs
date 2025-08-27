@@ -22,33 +22,73 @@ struct ProtectionChecks {
 }
 
 impl ProtectionChecks {
-    fn score(&self) -> u8 {
-        let mut s = 0u8;
+    fn score(&self) -> u32 {
+        let weights = Weights::default();
+        let mut s: u32 = 0;
         if self.pr_one_approval.pass {
-            s += 1
+            s += weights.pr_one_approval
         }
         if self.pr_dismiss_stale.pass {
-            s += 1
+            s += weights.pr_dismiss_stale
         }
         if self.pr_require_code_owner.pass {
-            s += 1
+            s += weights.pr_require_code_owner
         }
         if self.disable_force_push.pass {
-            s += 1
+            s += weights.disable_force_push
         }
         if self.disable_deletion.pass {
-            s += 1
+            s += weights.disable_deletion
         }
         if self.require_signed_commits.pass {
-            s += 1
+            s += weights.require_signed_commits
         }
         if self.require_status_checks.pass {
-            s += 1
+            s += weights.require_status_checks
         }
         if self.codeowners_valid.pass {
-            s += 1
+            s += weights.codeowners_valid
         }
         s
+    }
+
+    fn max_score() -> u32 {
+        let w = Weights::default();
+        w.pr_one_approval
+            + w.pr_dismiss_stale
+            + w.pr_require_code_owner
+            + w.disable_force_push
+            + w.disable_deletion
+            + w.require_signed_commits
+            + w.require_status_checks
+            + w.codeowners_valid
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Weights {
+    pr_one_approval: u32,
+    pr_dismiss_stale: u32,
+    pr_require_code_owner: u32,
+    disable_force_push: u32,
+    disable_deletion: u32,
+    require_signed_commits: u32,
+    require_status_checks: u32,
+    codeowners_valid: u32,
+}
+
+impl Default for Weights {
+    fn default() -> Self {
+        Self {
+            pr_one_approval: 1,
+            pr_dismiss_stale: 1,
+            pr_require_code_owner: 1,
+            disable_force_push: 1,
+            disable_deletion: 1,
+            require_signed_commits: 1,
+            require_status_checks: 1,
+            codeowners_valid: 1,
+        }
     }
 }
 
@@ -229,14 +269,16 @@ pub fn run_compliance_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
 }
 
 fn print_report(repo: &str, branch: &str, checks: ProtectionChecks) {
+    let max = ProtectionChecks::max_score();
     println!(
-        "{} {}  {} {}  {} {}",
+        "{} {}  {} {}  {} {}/{}",
         "Repo:".yellow(),
         repo.white(),
         "Default branch:".yellow(),
         branch.white(),
-        "Score (0-8):".yellow(),
-        checks.score().to_string().white()
+        "Score:".yellow(),
+        checks.score().to_string().white(),
+        max.to_string().white()
     );
     println!(
         "  - PR requires one approval: {}\n  - PR: dismiss stale reviews: {}\n  - PR requires code owners approval: {}\n  - Force-push disabled: {}\n  - Deletion disabled: {}\n  - Require signed commits: {}\n  - Require status checks: {}\n  - CODEOWNERS exists and is valid: {}\n",
