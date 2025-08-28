@@ -1,5 +1,6 @@
 use colored::Colorize;
 use serde::Deserialize;
+use std::fs::File;
 
 use crate::{make_github_request, Bootstrap};
 
@@ -140,7 +141,11 @@ struct RulesetRule {
     parameters: Option<serde_json::Value>,
 }
 
-pub fn run_compliance_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
+pub fn run_compliance_audit(
+    bootstrap: Bootstrap,
+    repos: Option<Vec<String>>,
+    csv_path: Option<String>,
+) {
     let repos = repos.unwrap_or_else(|| {
         bootstrap
             .fetch_all_repositories(75)
@@ -149,6 +154,31 @@ pub fn run_compliance_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             .map(|r| r.name)
             .collect::<Vec<String>>()
     });
+
+    // Prepare CSV writer if requested
+    let mut csv_writer = match csv_path {
+        Some(path) => {
+            let file = File::create(path).expect("Unable to create CSV file");
+            let mut wtr = csv::Writer::from_writer(file);
+            // Header
+            wtr.write_record([
+                "repository",
+                "default_branch",
+                "pr_one_approval",
+                "pr_dismiss_stale",
+                "pr_require_code_owner",
+                "disable_force_push",
+                "disable_deletion",
+                "require_signed_commits",
+                "require_status_checks",
+                "codeowners_valid",
+                "codeowners_path",
+            ])
+            .expect("Unable to write CSV header");
+            Some(wtr)
+        }
+        None => None,
+    };
 
     for repo in repos {
         let default_branch = match get_default_branch(&bootstrap, &repo) {
@@ -289,7 +319,31 @@ pub fn run_compliance_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
             mark_na(&mut checks.require_status_checks);
         }
 
-        print_report(&repo, &default_branch, checks);
+        // If CSV export is enabled, write a row; otherwise, print report
+        if let Some(wtr) = csv_writer.as_mut() {
+            let co_path = find_codeowners_path(&bootstrap, &repo).unwrap_or_else(|| "".to_string());
+            wtr.write_record([
+                repo.as_str(),
+                default_branch.as_str(),
+                check_csv_value(checks.pr_one_approval).as_str(),
+                check_csv_value(checks.pr_dismiss_stale).as_str(),
+                check_csv_value(checks.pr_require_code_owner).as_str(),
+                check_csv_value(checks.disable_force_push).as_str(),
+                check_csv_value(checks.disable_deletion).as_str(),
+                check_csv_value(checks.require_signed_commits).as_str(),
+                check_csv_value(checks.require_status_checks).as_str(),
+                check_csv_value(checks.codeowners_valid).as_str(),
+                co_path.as_str(),
+            ])
+            .expect("Unable to write CSV row");
+        } else {
+            print_report(&repo, &default_branch, checks);
+        }
+    }
+
+    // Flush CSV if used
+    if let Some(mut wtr) = csv_writer {
+        wtr.flush().expect("Unable to flush CSV writer");
     }
 }
 
@@ -326,6 +380,16 @@ fn check_symbol(v: Check) -> String {
         return "✅".to_string();
     }
     "❌".to_string()
+}
+
+fn check_csv_value(v: Check) -> String {
+    if v.no_access_403 {
+        return "403".to_string();
+    }
+    if v.pass {
+        return "pass".to_string();
+    }
+    "fail".to_string()
 }
 
 enum DefaultBranchFetch {
@@ -450,6 +514,27 @@ fn codeowners_exists_and_is_valid(bootstrap: &Bootstrap, repo: &str) -> Codeowne
         }
         Err(_) => CodeownersCheck::Error,
     }
+}
+
+// Try the common CODEOWNERS locations and return the repository-relative path if found
+fn find_codeowners_path(bootstrap: &Bootstrap, repo: &str) -> Option<String> {
+    const CO_LOCATIONS: [&str; 3] = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
+    for location in CO_LOCATIONS {
+        let url = format!("/repos/{}/{}/contents/{}", bootstrap.org, repo, location);
+        match make_github_request(&bootstrap.token, &url, 2, None) {
+            Ok(v) => {
+                if v.get("status").and_then(|s| s.as_str()) == Some("404") {
+                    continue;
+                }
+                // If GitHub returned an object for this path, it exists
+                if v.get("path").and_then(|p| p.as_str()).is_some() {
+                    return Some(location.to_string());
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+    None
 }
 
 
