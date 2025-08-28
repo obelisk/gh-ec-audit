@@ -1,6 +1,11 @@
 use colored::Colorize;
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
-use std::fs::File;
+use std::collections::HashSet;
+use std::fs::OpenOptions;
+use std::io::BufWriter;
+use std::path::Path;
+use std::{thread, time::Duration};
 
 use crate::{make_github_request, Bootstrap};
 
@@ -146,7 +151,7 @@ pub fn run_compliance_audit(
     repos: Option<Vec<String>>,
     csv_path: Option<String>,
 ) {
-    let repos = repos.unwrap_or_else(|| {
+    let mut repos = repos.unwrap_or_else(|| {
         bootstrap
             .fetch_all_repositories(75)
             .unwrap()
@@ -155,59 +160,126 @@ pub fn run_compliance_audit(
             .collect::<Vec<String>>()
     });
 
-    // Prepare CSV writer if requested
+    // Prepare CSV writer if requested; support appending and skipping already-processed repos
+    let mut already_processed: HashSet<String> = HashSet::new();
     let mut csv_writer = match csv_path {
-        Some(path) => {
-            let file = File::create(path).expect("Unable to create CSV file");
-            let mut wtr = csv::Writer::from_writer(file);
-            // Header
-            wtr.write_record([
-                "repository",
-                "default_branch",
-                "pr_one_approval",
-                "pr_dismiss_stale",
-                "pr_require_code_owner",
-                "disable_force_push",
-                "disable_deletion",
-                "require_signed_commits",
-                "require_status_checks",
-                "codeowners_valid",
-                "codeowners_path",
-            ])
-            .expect("Unable to write CSV header");
+        Some(ref path) => {
+            if Path::new(path).exists() {
+                already_processed = read_existing_csv_repos(path);
+            }
+            let should_write_header = match std::fs::metadata(path) {
+                Ok(m) => m.len() == 0,
+                Err(_) => true,
+            };
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .expect("Unable to open CSV file for append");
+            let buf = BufWriter::new(file);
+            let mut wtr = csv::WriterBuilder::new()
+                .has_headers(false)
+                .from_writer(buf);
+            if should_write_header {
+                wtr.write_record([
+                    "repository",
+                    "default_branch",
+                    "pr_one_approval",
+                    "pr_dismiss_stale",
+                    "pr_require_code_owner",
+                    "disable_force_push",
+                    "disable_deletion",
+                    "require_signed_commits",
+                    "require_status_checks",
+                    "codeowners_valid",
+                    "codeowners_path",
+                ])
+                .expect("Unable to write CSV header");
+                wtr.flush().ok();
+            }
             Some(wtr)
         }
         None => None,
     };
 
+    // If we have previously processed repos and CSV export is enabled, filter them out
+    if csv_writer.is_some() && !already_processed.is_empty() {
+        repos = repos
+            .into_iter()
+            .filter(|r| !already_processed.contains(r))
+            .collect::<Vec<String>>();
+    }
+
+    // Progress bar
+    let pb = ProgressBar::new(repos.len() as u64);
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("=>-"),
+    );
+
     for repo in repos {
-        let default_branch = match get_default_branch(&bootstrap, &repo) {
-            DefaultBranchFetch::Ok(b) => b,
-            DefaultBranchFetch::NoAccess403 => {
-                println!(
-                    "{} {}: {}",
-                    "Skipping repo".yellow(),
-                    repo.white(),
-                    "default branch not accessible (403)".red()
-                );
-                continue;
+        pb.set_message(format!("{}", repo));
+
+        // Retry default branch resolution to be resilient to transient failures
+        let max_attempts = 3;
+        let mut attempt = 0;
+        let mut default_branch_opt: Option<String> = None;
+        loop {
+            attempt += 1;
+            match get_default_branch(&bootstrap, &repo) {
+                DefaultBranchFetch::Ok(b) => {
+                    default_branch_opt = Some(b);
+                    break;
+                }
+                DefaultBranchFetch::NoAccess403 => {
+                    println!(
+                        "{} {}: {}",
+                        "Skipping repo".yellow(),
+                        repo.white(),
+                        "default branch not accessible (403)".red()
+                    );
+                    break;
+                }
+                DefaultBranchFetch::MissingOrError => {
+                    if attempt < max_attempts {
+                        thread::sleep(Duration::from_millis(600));
+                        continue;
+                    } else {
+                        println!(
+                            "{} {}: {}",
+                            "Skipping repo".yellow(),
+                            repo.white(),
+                            "could not determine default branch".red()
+                        );
+                        break;
+                    }
+                }
             }
-            DefaultBranchFetch::MissingOrError => {
-                println!(
-                    "{} {}: {}",
-                    "Skipping repo".yellow(),
-                    repo.white(),
-                    "could not determine default branch".red()
-                );
-                continue;
-            }
+        }
+        let Some(default_branch) = default_branch_opt else {
+            pb.inc(1);
+            continue;
         };
         let mut checks = ProtectionChecks::default();
         let mut saw_403_bpr = false;
         let mut saw_403_rules = false;
 
-        // 1) Classic BPR
-        match get_bpr(&bootstrap, &repo, &default_branch) {
+        // 1) Classic BPR with retries on transient errors
+        let mut bpr_fetch;
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            bpr_fetch = get_bpr(&bootstrap, &repo, &default_branch);
+            match bpr_fetch {
+                BprFetch::MissingOrError if attempts < max_attempts => {
+                    thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+                _ => break,
+            }
+        }
+        match bpr_fetch {
             BprFetch::Ok(bpr) => {
                 checks.disable_force_push.pass = !bpr
                     .allow_force_pushes
@@ -239,8 +311,21 @@ pub fn run_compliance_audit(
             BprFetch::MissingOrError => {}
         }
 
-        // 2) New Rulesets
-        match get_rules(&bootstrap, &repo, &default_branch) {
+        // 2) New Rulesets with retries on transient errors
+        let mut rules_fetch;
+        let mut attempts_r = 0;
+        loop {
+            attempts_r += 1;
+            rules_fetch = get_rules(&bootstrap, &repo, &default_branch);
+            match rules_fetch {
+                RulesFetch::MissingOrError if attempts_r < max_attempts => {
+                    thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+                _ => break,
+            }
+        }
+        match rules_fetch {
             RulesFetch::Ok(rules) => {
                 for rule in rules {
                     match rule._type.as_str() {
@@ -336,15 +421,19 @@ pub fn run_compliance_audit(
                 co_path.as_str(),
             ])
             .expect("Unable to write CSV row");
+            // Flush after every write to ensure durability on long runs
+            wtr.flush().ok();
         } else {
             print_report(&repo, &default_branch, checks);
         }
+        pb.inc(1);
     }
 
     // Flush CSV if used
     if let Some(mut wtr) = csv_writer {
         wtr.flush().expect("Unable to flush CSV writer");
     }
+    pb.finish_with_message("done");
 }
 
 fn print_report(repo: &str, branch: &str, checks: ProtectionChecks) {
@@ -535,6 +624,31 @@ fn find_codeowners_path(bootstrap: &Bootstrap, repo: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn read_existing_csv_repos(path: &str) -> HashSet<String> {
+    let mut set = HashSet::new();
+    let rdr = csv::Reader::from_path(path);
+    let mut rdr = match rdr {
+        Ok(r) => r,
+        Err(_) => return set,
+    };
+    let headers = match rdr.headers() {
+        Ok(h) => h.clone(),
+        Err(_) => return set,
+    };
+    let repo_idx = headers
+        .iter()
+        .position(|h| h == "repository")
+        .unwrap_or(0);
+    for result in rdr.records() {
+        if let Ok(record) = result {
+            if let Some(repo) = record.get(repo_idx) {
+                set.insert(repo.to_string());
+            }
+        }
+    }
+    set
 }
 
 
