@@ -154,7 +154,7 @@ pub fn run_compliance_audit(
 ) {
     let mut repos = repos.unwrap_or_else(|| {
         let mut list = bootstrap
-            .fetch_all_repositories(75)
+            .fetch_all_repositories(75, active_repo_only)
             .unwrap()
             .into_iter()
             .filter(|r| !active_repo_only || (!r.archived && !r.disabled))

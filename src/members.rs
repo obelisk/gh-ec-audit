@@ -75,7 +75,7 @@ pub fn run_admin_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
                 },
             })
             .collect(),
-        None => bootstrap.fetch_all_repositories(75).unwrap(),
+        None => bootstrap.fetch_all_repositories(75, false).unwrap(),
     };
 
     let mut team_cache: HashMap<String, HashMap<String, Member>> = HashMap::new();

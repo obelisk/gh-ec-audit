@@ -62,7 +62,7 @@ pub fn find_codeowners_in_org(
     let repos = match repos {
         Some(v) => v,
         None => bootstrap
-            .fetch_all_repositories(75)?
+            .fetch_all_repositories(75, false)?
             .into_iter()
             .map(|r| r.name)
             .collect::<Vec<String>>(),

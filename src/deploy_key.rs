@@ -44,7 +44,7 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool)
 
     println!("{} {}", "Success! I found: ".green(), members.len());
 
-    let repositories: HashSet<Repository> = bootstrap.fetch_all_repositories(75).unwrap();
+    let repositories: HashSet<Repository> = bootstrap.fetch_all_repositories(75, false).unwrap();
 
     println!("{}", "Finally the big one, I'm going to check each repository one by one to find deploy keys and their access. This is going to take a while...".yellow());
 

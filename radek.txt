@@ -1,0 +1,5 @@
+repository,default_branch,pr_one_approval,pr_dismiss_stale,pr_require_code_owner,disable_force_push,disable_deletion,require_signed_commits,require_status_checks,codeowners_valid,codeowners_path
+chainlink-testing-framework,main,403,403,403,403,403,403,403,pass,CODEOWNERS
+devenv,main,403,403,403,pass,pass,403,403,pass,CODEOWNERS
+chainlink,develop,403,403,403,pass,pass,403,403,pass,.github/CODEOWNERS
+crib,main,pass,pass,pass,pass,pass,pass,pass,pass,CODEOWNERS

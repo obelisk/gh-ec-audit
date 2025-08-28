@@ -370,11 +370,22 @@ impl Bootstrap {
         Ok(Self { token, org })
     }
 
-    pub fn fetch_all_repositories(&self, page_size: u8) -> Result<HashSet<Repository>, String> {
-        println!(
-            "{}",
-            "I'm going to fetch all repositories from the org".yellow()
-        );
+    pub fn fetch_all_repositories(
+        &self,
+        page_size: u8,
+        active_only: bool,
+    ) -> Result<HashSet<Repository>, String> {
+        if active_only {
+            println!(
+                "{}",
+                "I'm going to fetch all active repositories from the org".yellow()
+            );
+        } else {
+            println!(
+                "{}",
+                "I'm going to fetch all repositories from the org".yellow()
+            );
+        }
 
         let repositories: HashSet<Repository> = match make_paginated_github_request(
             &self.token,
