@@ -150,14 +150,18 @@ pub fn run_compliance_audit(
     bootstrap: Bootstrap,
     repos: Option<Vec<String>>,
     csv_path: Option<String>,
+    active_repo_only: bool,
 ) {
     let mut repos = repos.unwrap_or_else(|| {
-        bootstrap
+        let mut list = bootstrap
             .fetch_all_repositories(75)
             .unwrap()
             .into_iter()
+            .filter(|r| !active_repo_only || (!r.archived && !r.disabled))
             .map(|r| r.name)
-            .collect::<Vec<String>>()
+            .collect::<Vec<String>>();
+        list.sort();
+        list
     });
 
     // Prepare CSV writer if requested; support appending and skipping already-processed repos

@@ -54,6 +54,10 @@ struct Args {
     #[arg(long, value_name = "FILE")]
     comp_csv: Option<String>,
 
+    /// Consider only active repositories (non-archived and not disabled)
+    #[arg(long)]
+    active_repo_only: bool,
+
     /// Find occurrences of a team in CODEOWNERS files
     #[arg(long)]
     team_in_codeowners: bool,
@@ -126,7 +130,7 @@ fn main() {
             args.verbose,
         );
     } else if args.comp || args.comp_csv.is_some() {
-        compliance::run_compliance_audit(bootstrap, args.repos, args.comp_csv);
+        compliance::run_compliance_audit(bootstrap, args.repos, args.comp_csv, args.active_repo_only);
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {
             codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);

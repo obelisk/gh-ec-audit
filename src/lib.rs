@@ -89,6 +89,8 @@ impl Display for GitHubError {
 pub struct Repository {
     pub name: String,
     pub private: bool,
+    pub archived: bool,
+    pub disabled: bool,
     pub permissions: Permissions,
 }
 
