@@ -47,12 +47,12 @@ struct Args {
 
     /// Run repository protection compliance scoring (0-8).
     /// Tip: to run for all repositories, omit --repos
-    #[arg(long)]
+    #[arg(long = "comp-check")]
     comp: bool,
 
     /// Export compliance audit to a CSV file
-    #[arg(long, value_name = "FILE")]
-    comp_csv: Option<String>,
+    #[arg(long = "comp-check-csv", value_name = "FILE")]
+    comp_check_csv: Option<String>,
 
     /// Consider only active repositories (non-archived and not disabled)
     #[arg(long)]
@@ -129,8 +129,8 @@ fn main() {
             args.also_gh_api,
             args.verbose,
         );
-    } else if args.comp || args.comp_csv.is_some() {
-        compliance::run_compliance_audit(bootstrap, args.repos, args.comp_csv, args.active_repo_only);
+    } else if args.comp || args.comp_check_csv.is_some() {
+        compliance::run_compliance_audit(bootstrap, args.repos, args.comp_check_csv, args.active_repo_only);
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {
             codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);
