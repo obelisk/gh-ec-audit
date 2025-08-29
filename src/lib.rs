@@ -404,7 +404,23 @@ impl Bootstrap {
             }
         };
 
-        println!("{} {}", "Success! I found: ".green(), repositories.len());
+        let total = repositories.len();
+        let repositories: HashSet<Repository> = if active_only {
+            repositories
+                .into_iter()
+                .filter(|r| !r.archived && !r.disabled)
+                .collect()
+        } else {
+            repositories
+        };
+
+        println!(
+            "{} {} (active_only = {}, total = {})",
+            "Success! I found: ".green(),
+            repositories.len(),
+            active_only,
+            total
+        );
         if !repositories
             .iter()
             .fold(false, |acc, repo| acc || repo.private)
