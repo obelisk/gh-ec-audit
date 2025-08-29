@@ -188,6 +188,7 @@ pub fn run_compliance_audit(
                 wtr.write_record([
                     "repository",
                     "default_branch",
+                    "visibility",
                     "pr_one_approval",
                     "pr_dismiss_stale",
                     "pr_require_code_owner",
@@ -229,11 +230,13 @@ pub fn run_compliance_audit(
         let max_attempts = 3;
         let mut attempt = 0;
         let mut default_branch_opt: Option<String> = None;
+        let mut visibility_opt: Option<String> = None;
         loop {
             attempt += 1;
             match get_default_branch(&bootstrap, &repo) {
-                DefaultBranchFetch::Ok(b) => {
-                    default_branch_opt = Some(b);
+                DefaultBranchFetch::Ok(info) => {
+                    default_branch_opt = Some(info.branch);
+                    visibility_opt = info.visibility;
                     break;
                 }
                 DefaultBranchFetch::NoAccess403 => {
@@ -408,12 +411,16 @@ pub fn run_compliance_audit(
             mark_na(&mut checks.require_status_checks);
         }
 
+        // Determine repository visibility (reuse from repo metadata if present)
+        let visibility = visibility_opt.unwrap_or_else(|| "unknown".to_string());
+
         // If CSV export is enabled, write a row; otherwise, print report
         if let Some(wtr) = csv_writer.as_mut() {
             let co_path = find_codeowners_path(&bootstrap, &repo).unwrap_or_else(|| "".to_string());
             wtr.write_record([
                 repo.as_str(),
                 default_branch.as_str(),
+                visibility.as_str(),
                 check_csv_value(checks.pr_one_approval).as_str(),
                 check_csv_value(checks.pr_dismiss_stale).as_str(),
                 check_csv_value(checks.pr_require_code_owner).as_str(),
@@ -428,7 +435,7 @@ pub fn run_compliance_audit(
             // Flush after every write to ensure durability on long runs
             wtr.flush().ok();
         } else {
-            print_report(&repo, &default_branch, checks);
+            print_report(&repo, &default_branch, &visibility, checks);
         }
         pb.inc(1);
     }
@@ -440,14 +447,16 @@ pub fn run_compliance_audit(
     pb.finish_with_message("done");
 }
 
-fn print_report(repo: &str, branch: &str, checks: ProtectionChecks) {
+fn print_report(repo: &str, branch: &str, visibility: &str, checks: ProtectionChecks) {
     let max = ProtectionChecks::max_score();
     println!(
-        "{} {}  {} {}  {} {}/{}",
+        "{} {}  {} {}  {} {}  {} {}/{}",
         "Repo:".yellow(),
         repo.white(),
         "Default branch:".yellow(),
         branch.white(),
+        "Visibility:".yellow(),
+        visibility.white(),
         "Score:".yellow(),
         checks.score().to_string().white(),
         max.to_string().white()
@@ -485,8 +494,13 @@ fn check_csv_value(v: Check) -> String {
     "fail".to_string()
 }
 
+struct RepoInfo {
+    branch: String,
+    visibility: Option<String>,
+}
+
 enum DefaultBranchFetch {
-    Ok(String),
+    Ok(RepoInfo),
     NoAccess403,
     MissingOrError,
 }
@@ -504,7 +518,11 @@ fn get_default_branch(bootstrap: &Bootstrap, repo: &str) -> DefaultBranchFetch {
                 return DefaultBranchFetch::NoAccess403;
             }
             if let Some(branch) = res.get("default_branch").and_then(|v| v.as_str()) {
-                return DefaultBranchFetch::Ok(branch.to_string());
+                let visibility = res.get("visibility").and_then(|v| v.as_str()).map(|s| s.to_string());
+                return DefaultBranchFetch::Ok(RepoInfo {
+                    branch: branch.to_string(),
+                    visibility,
+                });
             }
         }
         Err(_) => {}
@@ -608,6 +626,8 @@ fn codeowners_exists_and_is_valid(bootstrap: &Bootstrap, repo: &str) -> Codeowne
         Err(_) => CodeownersCheck::Error,
     }
 }
+
+// (removed) get_repo_visibility in favor of reusing repository metadata
 
 // Try the common CODEOWNERS locations and return the repository-relative path if found
 fn find_codeowners_path(bootstrap: &Bootstrap, repo: &str) -> Option<String> {
