@@ -54,6 +54,11 @@ struct Args {
     #[arg(long = "comp-check-csv", value_name = "FILE")]
     comp_check_csv: Option<String>,
 
+    /// Limit which compliance checks to run (comma-separated).
+    /// Available: pr_one_approval, pr_dismiss_stale, pr_require_code_owner, disable_force_push, disable_deletion, require_signed_commits, require_status_checks, codeowners_valid
+    #[arg(long = "comp-checks", value_delimiter = ',', value_name = "LIST")]
+    comp_checks: Option<Vec<String>>,
+
     /// Consider only active repositories (non-archived and not disabled)
     #[arg(long)]
     active_repo_only: bool,
@@ -130,7 +135,17 @@ fn main() {
             args.verbose,
         );
     } else if args.comp || args.comp_check_csv.is_some() {
-        compliance::run_compliance_audit(bootstrap, args.repos, args.comp_check_csv, args.active_repo_only);
+        let selected = args
+            .comp_checks
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.to_string()).collect());
+        compliance::run_compliance_audit(
+            bootstrap,
+            args.repos,
+            args.comp_check_csv,
+            args.active_repo_only,
+            selected,
+        );
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {
             codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);

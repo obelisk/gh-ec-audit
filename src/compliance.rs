@@ -40,49 +40,7 @@ struct ProtectionChecks {
     codeowners_valid: Check,
 }
 
-impl ProtectionChecks {
-    fn score(&self) -> u32 {
-        let weights = Weights::default();
-        let mut s: u32 = 0;
-        if self.pr_one_approval.pass {
-            s += weights.pr_one_approval
-        }
-        if self.pr_dismiss_stale.pass {
-            s += weights.pr_dismiss_stale
-        }
-        if self.pr_require_code_owner.pass {
-            s += weights.pr_require_code_owner
-        }
-        if self.disable_force_push.pass {
-            s += weights.disable_force_push
-        }
-        if self.disable_deletion.pass {
-            s += weights.disable_deletion
-        }
-        if self.require_signed_commits.pass {
-            s += weights.require_signed_commits
-        }
-        if self.require_status_checks.pass {
-            s += weights.require_status_checks
-        }
-        if self.codeowners_valid.pass {
-            s += weights.codeowners_valid
-        }
-        s
-    }
-
-    fn max_score() -> u32 {
-        let w = Weights::default();
-        w.pr_one_approval
-            + w.pr_dismiss_stale
-            + w.pr_require_code_owner
-            + w.disable_force_push
-            + w.disable_deletion
-            + w.require_signed_commits
-            + w.require_status_checks
-            + w.codeowners_valid
-    }
-}
+impl ProtectionChecks {}
 
 #[derive(Clone, Copy)]
 struct Weights {
@@ -151,7 +109,19 @@ pub fn run_compliance_audit(
     repos: Option<Vec<String>>,
     csv_path: Option<String>,
     active_repo_only: bool,
+    selected_checks: Option<Vec<String>>,
 ) {
+    let selected_set: Option<std::collections::HashSet<String>> = selected_checks.map(|v| {
+        v.into_iter()
+            .map(|s| s.to_lowercase())
+            .collect::<std::collections::HashSet<String>>()
+    });
+    let is_selected = |name: &str| -> bool {
+        match &selected_set {
+            None => true,
+            Some(s) => s.contains(&name.to_lowercase()),
+        }
+    };
     let mut repos = repos.unwrap_or_else(|| {
         let mut list = bootstrap
             .fetch_all_repositories(75, active_repo_only)
@@ -272,76 +242,100 @@ pub fn run_compliance_audit(
         let mut saw_403_bpr = false;
         let mut saw_403_rules = false;
 
+        // Determine which sources are needed based on selected checks
+        let need_bpr =
+            is_selected("disable_force_push") || is_selected("disable_deletion") || is_selected("require_signed_commits") ||
+            is_selected("pr_one_approval") || is_selected("pr_dismiss_stale") || is_selected("pr_require_code_owner") ||
+            is_selected("require_status_checks");
+
         // 1) Classic BPR with retries on transient errors
-        let mut bpr_fetch;
-        let mut attempts = 0;
-        loop {
-            attempts += 1;
-            bpr_fetch = get_bpr(&bootstrap, &repo, &default_branch);
+        if need_bpr {
+            let mut bpr_fetch;
+            let mut attempts = 0;
+            loop {
+                attempts += 1;
+                bpr_fetch = get_bpr(&bootstrap, &repo, &default_branch);
+                match bpr_fetch {
+                    BprFetch::MissingOrError if attempts < max_attempts => {
+                        thread::sleep(Duration::from_millis(500));
+                        continue;
+                    }
+                    _ => break,
+                }
+            }
             match bpr_fetch {
-                BprFetch::MissingOrError if attempts < max_attempts => {
-                    thread::sleep(Duration::from_millis(500));
-                    continue;
+                BprFetch::Ok(bpr) => {
+                    if is_selected("disable_force_push") {
+                        checks.disable_force_push.pass = !bpr
+                            .allow_force_pushes
+                            .as_ref()
+                            .map(|f| f.enabled)
+                            .unwrap_or(false);
+                    }
+                    if is_selected("disable_deletion") {
+                        checks.disable_deletion.pass = !bpr
+                            .allow_deletions
+                            .as_ref()
+                            .map(|f| f.enabled)
+                            .unwrap_or(false);
+                    }
+                    if is_selected("require_signed_commits") {
+                        checks.require_signed_commits.pass = bpr
+                            .required_signatures
+                            .as_ref()
+                            .map(|f| f.enabled)
+                            .unwrap_or(false);
+                    }
+                    if let Some(pr) = &bpr.required_pull_request_reviews {
+                        if is_selected("pr_one_approval") {
+                            checks.pr_one_approval.pass = pr.required_approving_review_count > 0;
+                        }
+                        if is_selected("pr_dismiss_stale") {
+                            checks.pr_dismiss_stale.pass = pr.dismiss_stale_reviews;
+                        }
+                        if is_selected("pr_require_code_owner") {
+                            checks.pr_require_code_owner.pass = pr.require_code_owner_reviews;
+                        }
+                    }
+                    if is_selected("require_status_checks") {
+                        if let Some(rsc) = &bpr.required_status_checks {
+                            checks.require_status_checks.pass = !rsc.checks.is_empty();
+                        }
+                    }
                 }
-                _ => break,
-            }
-        }
-        match bpr_fetch {
-            BprFetch::Ok(bpr) => {
-                checks.disable_force_push.pass = !bpr
-                    .allow_force_pushes
-                    .as_ref()
-                    .map(|f| f.enabled)
-                    .unwrap_or(false);
-                checks.disable_deletion.pass = !bpr
-                    .allow_deletions
-                    .as_ref()
-                    .map(|f| f.enabled)
-                    .unwrap_or(false);
-                checks.require_signed_commits.pass = bpr
-                    .required_signatures
-                    .as_ref()
-                    .map(|f| f.enabled)
-                    .unwrap_or(false);
-                if let Some(pr) = &bpr.required_pull_request_reviews {
-                    checks.pr_one_approval.pass = pr.required_approving_review_count > 0;
-                    checks.pr_dismiss_stale.pass = pr.dismiss_stale_reviews;
-                    checks.pr_require_code_owner.pass = pr.require_code_owner_reviews;
+                BprFetch::NoAccess403 => {
+                    saw_403_bpr = true;
                 }
-                if let Some(rsc) = &bpr.required_status_checks {
-                    checks.require_status_checks.pass = !rsc.checks.is_empty();
-                }
+                BprFetch::MissingOrError => {}
             }
-            BprFetch::NoAccess403 => {
-                saw_403_bpr = true;
-            }
-            BprFetch::MissingOrError => {}
         }
 
         // 2) New Rulesets with retries on transient errors
-        let mut rules_fetch;
+        let mut rules_fetch = RulesFetch::MissingOrError;
         let mut attempts_r = 0;
-        loop {
-            attempts_r += 1;
-            rules_fetch = get_rules(&bootstrap, &repo, &default_branch);
-            match rules_fetch {
-                RulesFetch::MissingOrError if attempts_r < max_attempts => {
-                    thread::sleep(Duration::from_millis(500));
-                    continue;
+        if need_bpr {
+            loop {
+                attempts_r += 1;
+                rules_fetch = get_rules(&bootstrap, &repo, &default_branch);
+                match rules_fetch {
+                    RulesFetch::MissingOrError if attempts_r < max_attempts => {
+                        thread::sleep(Duration::from_millis(500));
+                        continue;
+                    }
+                    _ => break,
                 }
-                _ => break,
             }
         }
         match rules_fetch {
             RulesFetch::Ok(rules) => {
                 for rule in rules {
                     match rule._type.as_str() {
-                        "deletion" => checks.disable_deletion.pass = true,
-                        "required_signatures" => checks.require_signed_commits.pass = true,
-                        "non_fast_forward" => checks.disable_force_push.pass = true,
+                        "deletion" => { if is_selected("disable_deletion") { checks.disable_deletion.pass = true; } }
+                        "required_signatures" => { if is_selected("require_signed_commits") { checks.require_signed_commits.pass = true; } }
+                        "non_fast_forward" => { if is_selected("disable_force_push") { checks.disable_force_push.pass = true; } }
                         "pull_request" => {
                             if let Some(params) = rule.parameters.as_ref() {
-                                if params
+                                if is_selected("pr_one_approval") && params
                                     .get("required_approving_review_count")
                                     .and_then(|v| v.as_u64())
                                     .unwrap_or(0)
@@ -349,14 +343,14 @@ pub fn run_compliance_audit(
                                 {
                                     checks.pr_one_approval.pass = true;
                                 }
-                                if params
+                                if is_selected("pr_dismiss_stale") && params
                                     .get("dismiss_stale_reviews_on_push")
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false)
                                 {
                                     checks.pr_dismiss_stale.pass = true;
                                 }
-                                if params
+                                if is_selected("pr_require_code_owner") && params
                                     .get("require_code_owner_review")
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false)
@@ -366,14 +360,16 @@ pub fn run_compliance_audit(
                             }
                         }
                         "required_status_checks" => {
-                            if let Some(params) = rule.parameters.as_ref() {
-                                if params
-                                    .get("required_status_checks")
-                                    .and_then(|v| v.as_array())
-                                    .map(|a| !a.is_empty())
-                                    .unwrap_or(false)
-                                {
-                                    checks.require_status_checks.pass = true;
+                            if is_selected("require_status_checks") {
+                                if let Some(params) = rule.parameters.as_ref() {
+                                    if params
+                                        .get("required_status_checks")
+                                        .and_then(|v| v.as_array())
+                                        .map(|a| !a.is_empty())
+                                        .unwrap_or(false)
+                                    {
+                                        checks.require_status_checks.pass = true;
+                                    }
                                 }
                             }
                         }
@@ -388,11 +384,13 @@ pub fn run_compliance_audit(
         }
 
         // 3) CODEOWNERS exists and is valid
-        match codeowners_exists_and_is_valid(&bootstrap, &repo) {
-            CodeownersCheck::Valid => checks.codeowners_valid.pass = true,
-            CodeownersCheck::Invalid | CodeownersCheck::Missing => {}
-            CodeownersCheck::NoAccess403 => checks.codeowners_valid.no_access_403 = true,
-            CodeownersCheck::Error => {}
+        if is_selected("codeowners_valid") {
+            match codeowners_exists_and_is_valid(&bootstrap, &repo) {
+                CodeownersCheck::Valid => checks.codeowners_valid.pass = true,
+                CodeownersCheck::Invalid | CodeownersCheck::Missing => {}
+                CodeownersCheck::NoAccess403 => checks.codeowners_valid.no_access_403 = true,
+                CodeownersCheck::Error => {}
+            }
         }
 
         // Propagate 403 status for checks unresolved by either source
@@ -416,26 +414,32 @@ pub fn run_compliance_audit(
 
         // If CSV export is enabled, write a row; otherwise, print report
         if let Some(wtr) = csv_writer.as_mut() {
-            let co_path = find_codeowners_path(&bootstrap, &repo).unwrap_or_else(|| "".to_string());
+            let co_path = if is_selected("codeowners_valid") { find_codeowners_path(&bootstrap, &repo).unwrap_or_else(|| "".to_string()) } else { "".to_string() };
             wtr.write_record([
                 repo.as_str(),
                 default_branch.as_str(),
                 visibility.as_str(),
-                check_csv_value(checks.pr_one_approval).as_str(),
-                check_csv_value(checks.pr_dismiss_stale).as_str(),
-                check_csv_value(checks.pr_require_code_owner).as_str(),
-                check_csv_value(checks.disable_force_push).as_str(),
-                check_csv_value(checks.disable_deletion).as_str(),
-                check_csv_value(checks.require_signed_commits).as_str(),
-                check_csv_value(checks.require_status_checks).as_str(),
-                check_csv_value(checks.codeowners_valid).as_str(),
+                check_csv_value_named(checks.pr_one_approval, "pr_one_approval", selected_set.as_ref()).as_str(),
+                check_csv_value_named(checks.pr_dismiss_stale, "pr_dismiss_stale", selected_set.as_ref()).as_str(),
+                check_csv_value_named(checks.pr_require_code_owner, "pr_require_code_owner", selected_set.as_ref()).as_str(),
+                check_csv_value_named(checks.disable_force_push, "disable_force_push", selected_set.as_ref()).as_str(),
+                check_csv_value_named(checks.disable_deletion, "disable_deletion", selected_set.as_ref()).as_str(),
+                check_csv_value_named(checks.require_signed_commits, "require_signed_commits", selected_set.as_ref()).as_str(),
+                check_csv_value_named(checks.require_status_checks, "require_status_checks", selected_set.as_ref()).as_str(),
+                check_csv_value_named(checks.codeowners_valid, "codeowners_valid", selected_set.as_ref()).as_str(),
                 co_path.as_str(),
             ])
             .expect("Unable to write CSV row");
             // Flush after every write to ensure durability on long runs
             wtr.flush().ok();
         } else {
-            print_report(&repo, &default_branch, &visibility, checks);
+            print_report(
+                &repo,
+                &default_branch,
+                &visibility,
+                checks,
+                selected_set.as_ref(),
+            );
         }
         pb.inc(1);
     }
@@ -447,8 +451,14 @@ pub fn run_compliance_audit(
     pb.finish_with_message("done");
 }
 
-fn print_report(repo: &str, branch: &str, visibility: &str, checks: ProtectionChecks) {
-    let max = ProtectionChecks::max_score();
+fn print_report(
+    repo: &str,
+    branch: &str,
+    visibility: &str,
+    checks: ProtectionChecks,
+    selected: Option<&std::collections::HashSet<String>>,
+) {
+    let (score, max) = compute_selected_score(&checks, selected);
     println!(
         "{} {}  {} {}  {} {}  {} {}/{}",
         "Repo:".yellow(),
@@ -458,20 +468,101 @@ fn print_report(repo: &str, branch: &str, visibility: &str, checks: ProtectionCh
         "Visibility:".yellow(),
         visibility.white(),
         "Score:".yellow(),
-        checks.score().to_string().white(),
+        score.to_string().white(),
         max.to_string().white()
     );
-    println!(
-        "  - PR requires one approval: {}\n  - PR: dismiss stale reviews: {}\n  - PR requires code owners approval: {}\n  - Force-push disabled: {}\n  - Deletion disabled: {}\n  - Require signed commits: {}\n  - Require status checks: {}\n  - CODEOWNERS exists and is valid: {}\n",
-        check_symbol(checks.pr_one_approval),
-        check_symbol(checks.pr_dismiss_stale),
-        check_symbol(checks.pr_require_code_owner),
-        check_symbol(checks.disable_force_push),
-        check_symbol(checks.disable_deletion),
-        check_symbol(checks.require_signed_commits),
-        check_symbol(checks.require_status_checks),
-        check_symbol(checks.codeowners_valid)
-    );
+    let show = |name: &str, sel: Option<&std::collections::HashSet<String>>| -> bool {
+        match sel { None => true, Some(s) => s.contains(&name.to_lowercase()) }
+    };
+
+    if show("pr_one_approval", selected) {
+        println!(
+            "  - PR requires one approval: {}",
+            check_symbol(checks.pr_one_approval)
+        );
+    }
+    if show("pr_dismiss_stale", selected) {
+        println!(
+            "  - PR: dismiss stale reviews: {}",
+            check_symbol(checks.pr_dismiss_stale)
+        );
+    }
+    if show("pr_require_code_owner", selected) {
+        println!(
+            "  - PR requires code owners approval: {}",
+            check_symbol(checks.pr_require_code_owner)
+        );
+    }
+    if show("disable_force_push", selected) {
+        println!(
+            "  - Force-push disabled: {}",
+            check_symbol(checks.disable_force_push)
+        );
+    }
+    if show("disable_deletion", selected) {
+        println!(
+            "  - Deletion disabled: {}",
+            check_symbol(checks.disable_deletion)
+        );
+    }
+    if show("require_signed_commits", selected) {
+        println!(
+            "  - Require signed commits: {}",
+            check_symbol(checks.require_signed_commits)
+        );
+    }
+    if show("require_status_checks", selected) {
+        println!(
+            "  - Require status checks: {}",
+            check_symbol(checks.require_status_checks)
+        );
+    }
+    if show("codeowners_valid", selected) {
+        println!(
+            "  - CODEOWNERS exists and is valid: {}",
+            check_symbol(checks.codeowners_valid)
+        );
+    }
+}
+
+fn compute_selected_score(
+    checks: &ProtectionChecks,
+    selected: Option<&std::collections::HashSet<String>>,
+) -> (u32, u32) {
+    let weights = Weights::default();
+    // Helper to get (pass, weight, include)
+    let mut items: Vec<(bool, u32)> = Vec::new();
+    let include = |name: &str, sel: Option<&std::collections::HashSet<String>>| -> bool {
+        match sel { None => true, Some(s) => s.contains(&name.to_lowercase()) }
+    };
+    if include("pr_one_approval", selected) {
+        items.push((checks.pr_one_approval.pass, weights.pr_one_approval));
+    }
+    if include("pr_dismiss_stale", selected) {
+        items.push((checks.pr_dismiss_stale.pass, weights.pr_dismiss_stale));
+    }
+    if include("pr_require_code_owner", selected) {
+        items.push((checks.pr_require_code_owner.pass, weights.pr_require_code_owner));
+    }
+    if include("disable_force_push", selected) {
+        items.push((checks.disable_force_push.pass, weights.disable_force_push));
+    }
+    if include("disable_deletion", selected) {
+        items.push((checks.disable_deletion.pass, weights.disable_deletion));
+    }
+    if include("require_signed_commits", selected) {
+        items.push((checks.require_signed_commits.pass, weights.require_signed_commits));
+    }
+    if include("require_status_checks", selected) {
+        items.push((checks.require_status_checks.pass, weights.require_status_checks));
+    }
+    if include("codeowners_valid", selected) {
+        items.push((checks.codeowners_valid.pass, weights.codeowners_valid));
+    }
+
+    let max: u32 = items.iter().map(|(_, w)| *w).sum();
+    let score: u32 = items.iter().map(|(p, w)| if *p { *w } else { 0 }).sum();
+    (score, max)
 }
 
 fn check_symbol(v: Check) -> String {
@@ -492,6 +583,18 @@ fn check_csv_value(v: Check) -> String {
         return "pass".to_string();
     }
     "fail".to_string()
+}
+
+fn check_csv_value_named(v: Check, name: &str, selected: Option<&std::collections::HashSet<String>>) -> String {
+    match selected {
+        None => check_csv_value(v),
+        Some(s) => {
+            if !s.contains(&name.to_lowercase()) {
+                return "n/a".to_string();
+            }
+            check_csv_value(v)
+        }
+    }
 }
 
 struct RepoInfo {
