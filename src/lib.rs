@@ -370,6 +370,10 @@ impl Bootstrap {
         Ok(Self { token, org })
     }
 
+    /// Fetch all repositories in an org.
+    /// Args:
+    /// * `page_size` - The size of each page when making requests to the GH API
+    /// * `active_only` - Consider only active repositories (non-archived and not disabled)
     pub fn fetch_all_repositories(
         &self,
         page_size: u8,
