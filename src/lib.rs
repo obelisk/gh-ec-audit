@@ -9,6 +9,7 @@ use colored::Colorize;
 
 pub mod bpr;
 pub mod codeowners;
+pub mod compliance;
 pub mod deploy_key;
 pub mod external_collaborator;
 pub mod members;
@@ -88,6 +89,8 @@ impl Display for GitHubError {
 pub struct Repository {
     pub name: String,
     pub private: bool,
+    pub archived: bool,
+    pub disabled: bool,
     pub permissions: Permissions,
 }
 
@@ -367,11 +370,26 @@ impl Bootstrap {
         Ok(Self { token, org })
     }
 
-    pub fn fetch_all_repositories(&self, page_size: u8) -> Result<HashSet<Repository>, String> {
-        println!(
-            "{}",
-            "I'm going to fetch all repositories from the org".yellow()
-        );
+    /// Fetch all repositories in an org.
+    /// Args:
+    /// * `page_size` - The size of each page when making requests to the GH API
+    /// * `active_only` - Consider only active repositories (non-archived and not disabled)
+    pub fn fetch_all_repositories(
+        &self,
+        page_size: u8,
+        active_only: bool,
+    ) -> Result<HashSet<Repository>, String> {
+        if active_only {
+            println!(
+                "{}",
+                "I'm going to fetch all active repositories from the org".yellow()
+            );
+        } else {
+            println!(
+                "{}",
+                "I'm going to fetch all repositories from the org".yellow()
+            );
+        }
 
         let repositories: HashSet<Repository> = match make_paginated_github_request(
             &self.token,
@@ -390,7 +408,23 @@ impl Bootstrap {
             }
         };
 
-        println!("{} {}", "Success! I found: ".green(), repositories.len());
+        let total = repositories.len();
+        let repositories: HashSet<Repository> = if active_only {
+            repositories
+                .into_iter()
+                .filter(|r| !r.archived && !r.disabled)
+                .collect()
+        } else {
+            repositories
+        };
+
+        println!(
+            "{} {} (active_only = {}, total = {})",
+            "Success! I found: ".green(),
+            repositories.len(),
+            active_only,
+            total
+        );
         if !repositories
             .iter()
             .fold(false, |acc, repo| acc || repo.private)

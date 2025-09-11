@@ -1,5 +1,6 @@
 use colored::Colorize;
 use gh_ec_audit::bpr;
+use gh_ec_audit::compliance;
 use gh_ec_audit::deploy_key;
 use gh_ec_audit::external_collaborator;
 
@@ -44,6 +45,24 @@ struct Args {
     #[arg(short, long)]
     codeowners: bool,
 
+    /// Run repository protection compliance scoring (0-8).
+    /// Tip: to run for all repositories, omit --repos
+    #[arg(long = "comp-check")]
+    comp: bool,
+
+    /// Export compliance audit to a CSV file
+    #[arg(long = "comp-check-csv", value_name = "FILE")]
+    comp_check_csv: Option<String>,
+
+    /// Limit which compliance checks to run (comma-separated).
+    /// Available: pr_one_approval, pr_dismiss_stale, pr_require_code_owner, disable_force_push, disable_deletion, require_signed_commits, require_status_checks, codeowners_valid
+    #[arg(long = "comp-checks", value_delimiter = ',', value_name = "LIST")]
+    comp_checks: Option<Vec<String>>,
+
+    /// Consider only active repositories (non-archived and not disabled)
+    #[arg(long)]
+    active_repo_only: bool,
+
     /// Find occurrences of a team in CODEOWNERS files
     #[arg(long)]
     team_in_codeowners: bool,
@@ -64,7 +83,8 @@ struct Args {
     #[clap(long, default_value_t = false)]
     search: bool,
 
-    /// Limit the scanning to the given repos
+    /// Limit the scanning to the given repos.
+    /// Omit this flag to scan all repositories
     #[clap(short, long, value_delimiter = ',', num_args = 1..)]
     repos: Option<Vec<String>>,
 
@@ -113,6 +133,18 @@ fn main() {
             args.search,
             args.also_gh_api,
             args.verbose,
+        );
+    } else if args.comp || args.comp_check_csv.is_some() {
+        let selected = args
+            .comp_checks
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.to_string()).collect());
+        compliance::run_compliance_audit(
+            bootstrap,
+            args.repos,
+            args.comp_check_csv,
+            args.active_repo_only,
+            selected,
         );
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {

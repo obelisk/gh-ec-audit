@@ -138,7 +138,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         "Alright! Now I need to fetch all repositories so I can check for their access.".yellow()
     );
 
-    let repositories: HashSet<Repository> = bootstrap.fetch_all_repositories(75).unwrap();
+    let repositories: HashSet<Repository> = bootstrap.fetch_all_repositories(75, false).unwrap();
 
     println!("{}", "Finally the big one, I'm going to check each repository one by one to find external collaborators and their access. This is going to take a while...".yellow());
 

@@ -78,7 +78,7 @@ fn get_rulesets(bootstrap: &Bootstrap, repo: impl Display, branch: impl Display)
 pub fn run_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
     let repos = repos.unwrap_or_else(|| {
         bootstrap
-            .fetch_all_repositories(75)
+            .fetch_all_repositories(75, false)
             .unwrap()
             .into_iter()
             .map(|r| r.name)
