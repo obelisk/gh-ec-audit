@@ -1,3 +1,4 @@
+mod repo;
 mod rules;
 mod utils;
 
@@ -8,21 +9,12 @@ use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::path::Path;
-use std::{thread, time::Duration};
 
-use crate::{make_github_request, Bootstrap};
+use crate::compliance::utils::{check_csv_value_named, check_symbol};
+use crate::Bootstrap;
 
-#[derive(Default, Debug, Clone, PartialEq)]
-/// Result of a single compliance check.
-enum Check {
-    /// The check is satisfied
-    Pass,
-    /// The check is not satisfied
-    #[default]
-    Fail,
-    /// The check could not be evaluated due to lack of access (HTTP 403)
-    NoAccess,
-}
+/// `Some(true)` means passing, `Some(false)` means failing, `None` means undetermined
+type Check = Option<bool>;
 
 #[derive(PartialEq)]
 enum Errors {
@@ -30,7 +22,7 @@ enum Errors {
     MissingOrError,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 struct ProtectionChecks {
     /// Pull requests require at least one approving review
     pr_one_approval: Check,
@@ -48,6 +40,22 @@ struct ProtectionChecks {
     require_status_checks: Check,
     /// CODEOWNERS file exists and GitHub reports zero parsing/ownership errors
     codeowners_valid: Check,
+}
+
+impl Default for ProtectionChecks {
+    /// By default, all checks are failing
+    fn default() -> Self {
+        Self {
+            pr_one_approval: Some(false),
+            pr_dismiss_stale: Some(false),
+            pr_require_code_owner: Some(false),
+            disable_force_push: Some(false),
+            disable_deletion: Some(false),
+            require_signed_commits: Some(false),
+            require_status_checks: Some(false),
+            codeowners_valid: Some(false),
+        }
+    }
 }
 
 /// Weights for the different checks (in case some are more important than others)
@@ -137,14 +145,18 @@ pub fn run_compliance_audit(
     active_repo_only: bool,
     selected_checks: Option<Vec<String>>,
 ) {
-    // Select checks we are interested in
+    // When performing a compliance audit, we can choose to report only on some checks, like
+    // whether signed commits are required or whether PRs require at least 1 review, etc.
+    // Here, we select checks we are interested in: if we were passed some `selected_checks`, then we
+    // turn them in `Some(Set)`. Otherwise the Set will be `None`, which will mean all the checks are selected.
     let selected_set: Option<HashSet<String>> = selected_checks.map(|v| {
         v.into_iter()
             .map(|s| s.to_lowercase())
             .collect::<HashSet<String>>()
     });
-    // Simple function to determine if a check has been selected.
-    // If the user passed no selection, then all checks are selected by default.
+    // Simple function we will use later to determine if a check has been selected.
+    // If the user passed no selection, meaning `selected_set` is `None`, then
+    // all checks are selected by default.
     let is_selected = |name: &str| -> bool {
         match &selected_set {
             None => true,
@@ -230,44 +242,29 @@ pub fn run_compliance_audit(
     for repo in repos {
         pb.set_message(repo.clone());
 
-        // Retry default branch resolution to be resilient to transient failures
-        let max_attempts = 3;
-        let mut attempt = 0;
-        let (default_branch_opt, visibility_opt) = loop {
-            attempt += 1;
-            match get_default_branch(&bootstrap, &repo) {
-                Ok(info) => {
-                    break (Some(info.branch), info.visibility);
-                }
-                Err(Errors::NoAccess403) => {
-                    println!(
-                        "{} {}: {}",
-                        "Skipping repo".yellow(),
-                        repo.white(),
-                        "default branch not accessible (403)".red()
-                    );
-                    break (None, None);
-                }
-                Err(Errors::MissingOrError) => {
-                    if attempt < max_attempts {
-                        thread::sleep(Duration::from_millis(600));
-                        continue;
-                    } else {
-                        println!(
-                            "{} {}: {}",
-                            "Skipping repo".yellow(),
-                            repo.white(),
-                            "could not determine default branch".red()
-                        );
-                        break (None, None);
-                    }
-                }
+        let (default_branch, visibility_opt) = match repo::get_default_branch(&bootstrap, &repo, 3)
+        {
+            Ok(info) => (info.branch, info.visibility),
+            Err(Errors::NoAccess403) => {
+                println!(
+                    "{} {}: {}",
+                    "Skipping repo".yellow(),
+                    repo.white(),
+                    "default branch not accessible (403)".red()
+                );
+                pb.inc(1);
+                continue;
             }
-        };
-        // If something went wrong above and we did not get the default branch, skip this repo
-        let Some(default_branch) = default_branch_opt else {
-            pb.inc(1);
-            continue;
+            Err(Errors::MissingOrError) => {
+                println!(
+                    "{} {}: {}",
+                    "Skipping repo".yellow(),
+                    repo.white(),
+                    "could not determine default branch".red()
+                );
+                pb.inc(1);
+                continue;
+            }
         };
 
         // Initialize default (all failing) checks, which we will update as we scan through BPRs and rulesets
@@ -284,183 +281,159 @@ pub fn run_compliance_audit(
 
         if need_bpr {
             // 1) Classic BPR with retries on transient errors
-            let mut attempts = 0;
-            let bpr_fetch = loop {
-                attempts += 1;
-                match rules::get_bpr(&bootstrap, &repo, &default_branch) {
-                    Err(Errors::MissingOrError) => {
-                        if attempts < max_attempts {
-                            thread::sleep(Duration::from_millis(500));
-                            continue;
-                        } else {
-                            break Err(Errors::MissingOrError);
-                        }
+            let bpr_fetch = rules::get_bpr(&bootstrap, &repo, &default_branch, 3);
+
+            // Handle the OK case. Errors are handled separately
+            if let Ok(ref bpr) = bpr_fetch {
+                if is_selected("disable_force_push")
+                    && !(bpr
+                        .allow_force_pushes
+                        .as_ref()
+                        .map(|f| f.enabled)
+                        .unwrap_or(true))
+                {
+                    checks.disable_force_push = Some(true);
+                }
+                if is_selected("disable_deletion")
+                    && !(bpr
+                        .allow_deletions
+                        .as_ref()
+                        .map(|f| f.enabled)
+                        .unwrap_or(true))
+                {
+                    checks.disable_deletion = Some(true);
+                }
+                if is_selected("require_signed_commits")
+                    && bpr
+                        .required_signatures
+                        .as_ref()
+                        .map(|f| f.enabled)
+                        .unwrap_or(false)
+                {
+                    checks.require_signed_commits = Some(true);
+                }
+                if let Some(pr) = &bpr.required_pull_request_reviews {
+                    if is_selected("pr_one_approval") && pr.required_approving_review_count > 0 {
+                        checks.pr_one_approval = Some(true)
                     }
-                    Err(Errors::NoAccess403) => break Err(Errors::NoAccess403),
-                    Ok(bpr) => {
-                        if is_selected("disable_force_push")
-                            && !(bpr
-                                .allow_force_pushes
-                                .as_ref()
-                                .map(|f| f.enabled)
-                                .unwrap_or(true))
-                        {
-                            checks.disable_force_push = Check::Pass;
-                        }
-                        if is_selected("disable_deletion")
-                            && !(bpr
-                                .allow_deletions
-                                .as_ref()
-                                .map(|f| f.enabled)
-                                .unwrap_or(true))
-                        {
-                            checks.disable_deletion = Check::Pass;
-                        }
-                        if is_selected("require_signed_commits")
-                            && bpr
-                                .required_signatures
-                                .as_ref()
-                                .map(|f| f.enabled)
-                                .unwrap_or(false)
-                        {
-                            checks.require_signed_commits = Check::Pass;
-                        }
-                        if let Some(pr) = &bpr.required_pull_request_reviews {
-                            if is_selected("pr_one_approval")
-                                && pr.required_approving_review_count > 0
-                            {
-                                checks.pr_one_approval = Check::Pass
-                            }
-                            if is_selected("pr_dismiss_stale") && pr.dismiss_stale_reviews {
-                                checks.pr_dismiss_stale = Check::Pass;
-                            }
-                            if is_selected("pr_require_code_owner") && pr.require_code_owner_reviews
-                            {
-                                checks.pr_require_code_owner = Check::Pass;
-                            }
-                        }
-                        if is_selected("require_status_checks") {
-                            if let Some(rsc) = &bpr.required_status_checks {
-                                if !(rsc.checks.is_empty()) {
-                                    checks.require_status_checks = Check::Pass;
-                                }
-                            }
-                        }
-                        break Ok(());
+                    if is_selected("pr_dismiss_stale") && pr.dismiss_stale_reviews {
+                        checks.pr_dismiss_stale = Some(true);
+                    }
+                    if is_selected("pr_require_code_owner") && pr.require_code_owner_reviews {
+                        checks.pr_require_code_owner = Some(true);
                     }
                 }
-            };
+                if is_selected("require_status_checks") {
+                    if let Some(rsc) = &bpr.required_status_checks {
+                        if !(rsc.checks.is_empty()) {
+                            checks.require_status_checks = Some(true);
+                        }
+                    }
+                }
+            }
 
             // 2) New Rulesets with retries on transient errors
-            let mut attempts_r = 0;
-            let rules_fetch = loop {
-                attempts_r += 1;
-                match rules::get_rules(&bootstrap, &repo, &default_branch) {
-                    Err(Errors::MissingOrError) => {
-                        if attempts_r < max_attempts {
-                            thread::sleep(Duration::from_millis(500));
-                            continue;
-                        } else {
-                            break Err(Errors::MissingOrError);
-                        }
-                    }
-                    Err(Errors::NoAccess403) => break Err(Errors::NoAccess403),
-                    Ok(rules) => {
-                        for rule in rules {
-                            match rule.type_.as_str() {
-                                // The presence of this rule means deletion is disabled
-                                "deletion" => {
-                                    if is_selected("disable_deletion") {
-                                        checks.disable_deletion = Check::Pass;
-                                    }
-                                }
-                                // The presence of this rule means signed commits are required
-                                "required_signatures" => {
-                                    if is_selected("require_signed_commits") {
-                                        checks.require_signed_commits = Check::Pass;
-                                    }
-                                }
-                                // The presence of this rule means force push is disabled
-                                "non_fast_forward" => {
-                                    if is_selected("disable_force_push") {
-                                        checks.disable_force_push = Check::Pass;
-                                    }
-                                }
-                                // The presence of this rule means a PR is needed. Now we check the rule's params
-                                "pull_request" => {
-                                    if let Some(params) = rule.parameters.as_ref() {
-                                        if is_selected("pr_one_approval")
-                                            && params
-                                                .get("required_approving_review_count")
-                                                .and_then(|v| v.as_u64())
-                                                .unwrap_or(0)
-                                                > 0
-                                        {
-                                            checks.pr_one_approval = Check::Pass;
-                                        }
-                                        if is_selected("pr_dismiss_stale")
-                                            && params
-                                                .get("dismiss_stale_reviews_on_push")
-                                                .and_then(|v| v.as_bool())
-                                                .unwrap_or(false)
-                                        {
-                                            checks.pr_dismiss_stale = Check::Pass;
-                                        }
-                                        if is_selected("pr_require_code_owner")
-                                            && params
-                                                .get("require_code_owner_review")
-                                                .and_then(|v| v.as_bool())
-                                                .unwrap_or(false)
-                                        {
-                                            checks.pr_require_code_owner = Check::Pass;
-                                        }
-                                    }
-                                }
-                                "required_status_checks" => {
-                                    if is_selected("require_status_checks") {
-                                        if let Some(params) = rule.parameters.as_ref() {
-                                            if params
-                                                .get("required_status_checks")
-                                                .and_then(|v| v.as_array())
-                                                .map(|a| !a.is_empty())
-                                                .unwrap_or(false)
-                                            {
-                                                checks.require_status_checks = Check::Pass;
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
+            let rules_fetch = rules::get_rules(&bootstrap, &repo, &default_branch, 3);
+
+            // Handle the OK case. Errors are handled separately
+            if let Ok(ref rules) = rules_fetch {
+                for rule in rules {
+                    match rule.type_.as_str() {
+                        // The presence of this rule means deletion is disabled
+                        "deletion" => {
+                            if is_selected("disable_deletion") {
+                                checks.disable_deletion = Some(true);
                             }
                         }
-                        break Ok(());
+                        // The presence of this rule means signed commits are required
+                        "required_signatures" => {
+                            if is_selected("require_signed_commits") {
+                                checks.require_signed_commits = Some(true);
+                            }
+                        }
+                        // The presence of this rule means force push is disabled
+                        "non_fast_forward" => {
+                            if is_selected("disable_force_push") {
+                                checks.disable_force_push = Some(true);
+                            }
+                        }
+                        // The presence of this rule means a PR is needed. Now we check the rule's params
+                        "pull_request" => {
+                            if let Some(params) = rule.parameters.as_ref() {
+                                if is_selected("pr_one_approval")
+                                    && params
+                                        .get("required_approving_review_count")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0)
+                                        > 0
+                                {
+                                    checks.pr_one_approval = Some(true);
+                                }
+                                if is_selected("pr_dismiss_stale")
+                                    && params
+                                        .get("dismiss_stale_reviews_on_push")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                {
+                                    checks.pr_dismiss_stale = Some(true);
+                                }
+                                if is_selected("pr_require_code_owner")
+                                    && params
+                                        .get("require_code_owner_review")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                {
+                                    checks.pr_require_code_owner = Some(true);
+                                }
+                            }
+                        }
+                        // The presence of this rule means the "require status checks" checkbox is ticked. Now we check the rule's params
+                        "required_status_checks" => {
+                            if is_selected("require_status_checks") {
+                                if let Some(params) = rule.parameters.as_ref() {
+                                    if params
+                                        .get("required_status_checks")
+                                        .and_then(|v| v.as_array())
+                                        .map(|a| !a.is_empty())
+                                        .unwrap_or(false)
+                                    {
+                                        checks.require_status_checks = Some(true);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
-            };
+            }
 
             // Propagate 403 status for checks unresolved by either source
-            if Err(Errors::NoAccess403) == bpr_fetch || Err(Errors::NoAccess403) == rules_fetch {
-                let mark_na = |c: &mut Check| {
-                    if *c != Check::Pass {
-                        *c = Check::NoAccess
-                    }
-                };
-                mark_na(&mut checks.pr_one_approval);
-                mark_na(&mut checks.pr_dismiss_stale);
-                mark_na(&mut checks.pr_require_code_owner);
-                mark_na(&mut checks.disable_force_push);
-                mark_na(&mut checks.disable_deletion);
-                mark_na(&mut checks.require_signed_commits);
-                mark_na(&mut checks.require_status_checks);
+            match (&bpr_fetch, &rules_fetch) {
+                (Err(Errors::NoAccess403), _) | (_, Err(Errors::NoAccess403)) => {
+                    // Function that sets a check to None if nothing else had already set it to passed
+                    let mark_na = |c: &mut Check| {
+                        if *c != Some(true) {
+                            *c = None
+                        }
+                    };
+                    mark_na(&mut checks.pr_one_approval);
+                    mark_na(&mut checks.pr_dismiss_stale);
+                    mark_na(&mut checks.pr_require_code_owner);
+                    mark_na(&mut checks.disable_force_push);
+                    mark_na(&mut checks.disable_deletion);
+                    mark_na(&mut checks.require_signed_commits);
+                    mark_na(&mut checks.require_status_checks);
+                }
+                _ => {}
             }
         }
 
         // 3) CODEOWNERS exists and is valid
         if is_selected("codeowners_valid") {
             match utils::codeowners_exists_and_is_valid(&bootstrap, &repo) {
-                Ok(CodeownersStatus::Valid) => checks.codeowners_valid = Check::Pass,
+                Ok(CodeownersStatus::Valid) => checks.codeowners_valid = Some(true),
                 Ok(CodeownersStatus::Invalid) | Ok(CodeownersStatus::Missing) => {}
-                Err(Errors::NoAccess403) => checks.codeowners_valid = Check::NoAccess,
+                Err(Errors::NoAccess403) => checks.codeowners_valid = None,
                 Err(Errors::MissingOrError) => {}
             }
         }
@@ -671,64 +644,7 @@ fn compute_selected_score(
     let max: u32 = items.iter().map(|(_, w)| *w).sum();
     let score: u32 = items
         .iter()
-        .map(|(p, w)| if **p == Check::Pass { *w } else { 0 })
+        .map(|(p, w)| if **p == Some(true) { *w } else { 0 })
         .sum();
     (score, max)
-}
-
-fn check_symbol(v: Check) -> String {
-    match v {
-        Check::NoAccess => "? (403)".to_string(),
-        Check::Pass => "✅".to_string(),
-        _ => "❌".to_string(),
-    }
-}
-
-fn check_csv_value(v: Check) -> String {
-    match v {
-        Check::NoAccess => "403".to_string(),
-        Check::Pass => "pass".to_string(),
-        _ => "fail".to_string(),
-    }
-}
-
-fn check_csv_value_named(v: Check, name: &str, selected: Option<&HashSet<String>>) -> String {
-    match selected {
-        None => check_csv_value(v),
-        Some(s) => {
-            if !s.contains(&name.to_lowercase()) {
-                return "n/a".to_string();
-            }
-            check_csv_value(v)
-        }
-    }
-}
-
-fn get_default_branch(bootstrap: &Bootstrap, repo: &str) -> Result<RepoInfo, Errors> {
-    // Try repository metadata first
-    match make_github_request(
-        &bootstrap.token,
-        &format!("/repos/{}/{repo}", bootstrap.org),
-        3,
-        None,
-    ) {
-        Ok(res) => {
-            if res.get("status").and_then(|v| v.as_str()) == Some("403") {
-                return Err(Errors::NoAccess403);
-            }
-            if let Some(branch) = res.get("default_branch").and_then(|v| v.as_str()) {
-                let visibility = res
-                    .get("visibility")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                return Ok(RepoInfo {
-                    branch: branch.to_string(),
-                    visibility,
-                });
-            }
-        }
-        Err(_) => {}
-    }
-
-    Err(Errors::MissingOrError)
 }

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    compliance::{CodeownersStatus, Errors},
+    compliance::{Check, CodeownersStatus, Errors},
     make_github_request, Bootstrap,
 };
 
@@ -28,8 +28,7 @@ pub fn find_codeowners_path(bootstrap: &Bootstrap, repo: &str) -> Option<String>
 
 pub fn read_existing_csv_repos(path: &str) -> HashSet<String> {
     let mut set = HashSet::new();
-    let rdr = csv::Reader::from_path(path);
-    let mut rdr = match rdr {
+    let mut rdr = match csv::Reader::from_path(path) {
         Ok(r) => r,
         Err(_) => return set,
     };
@@ -69,5 +68,33 @@ pub fn codeowners_exists_and_is_valid(
             }
         }
         Err(_) => Err(Errors::MissingOrError),
+    }
+}
+
+pub fn check_symbol(v: Check) -> String {
+    match v {
+        None => "? (403)".to_string(),
+        Some(true) => "✅".to_string(),
+        _ => "❌".to_string(),
+    }
+}
+
+pub fn check_csv_value(v: Check) -> String {
+    match v {
+        None => "403".to_string(),
+        Some(true) => "pass".to_string(),
+        _ => "fail".to_string(),
+    }
+}
+
+pub fn check_csv_value_named(v: Check, name: &str, selected: Option<&HashSet<String>>) -> String {
+    match selected {
+        None => check_csv_value(v),
+        Some(s) => {
+            if !s.contains(&name.to_lowercase()) {
+                return "n/a".to_string();
+            }
+            check_csv_value(v)
+        }
     }
 }
