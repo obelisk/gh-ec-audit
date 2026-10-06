@@ -1,6 +1,6 @@
 mod audit;
 /// Use an iterative approach, i.e., scan repos one by one
-mod iterate;
+pub mod iterate;
 /// Leverage the GH search API to find relevant information
 mod search;
 
@@ -17,15 +17,15 @@ lazy_static! {
 }
 
 /// Represents a CODEOWNERS file
-struct CodeownersFile {
+pub struct CodeownersFile {
     /// Repository this CO file belongs to
-    repo: String,
+    pub repo: String,
     /// HTML URL, to give the user a quick way to reach the file
-    url: String,
+    pub url: String,
     /// List of all users mentioned in the file, for further analysis
-    users: HashSet<String>,
+    pub users: HashSet<String>,
     /// List of all teams mentioned in the file, for further analysis
-    teams: HashSet<String>,
+    pub teams: HashSet<String>,
 }
 
 impl CodeownersFile {

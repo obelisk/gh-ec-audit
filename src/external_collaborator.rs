@@ -7,7 +7,7 @@ use colored::Colorize;
 
 use crate::{
     get_repo_collaborators, make_paginated_github_request_with_index, Bootstrap, GitHubIndex,
-    Repository,
+    ProgressTracker, Repository,
 };
 
 pub type ExternalCollaboratorPermissions =
@@ -112,6 +112,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
 
     let outside_collaborators: HashMap<String, OutsideCollaborator> =
         match make_paginated_github_request_with_index(
+            &bootstrap.client,
             &bootstrap.token,
             100,
             &format!("/orgs/{}/outside_collaborators", &bootstrap.org),
@@ -142,8 +143,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
 
     println!("{}", "Finally the big one, I'm going to check each repository one by one to find external collaborators and their access. This is going to take a while...".yellow());
 
-    let one_percent = (repositories.len() as f64 * 0.01).ceil() as usize;
-    let mut progress = 0;
+    let mut tracker = ProgressTracker::new(repositories.len());
     let mut never_seen_outside_collaborators = outside_collaborators.clone();
 
     let mut ec_permissions = ExternalCollaboratorPermissions::new();
@@ -205,10 +205,7 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
                 never_seen_outside_collaborators.remove(&collaborator.login);
             }
         }
-        progress += 1;
-        if progress % one_percent == 0 {
-            println!("Processed {} reposistories", progress.to_string().blue());
-        }
+        tracker.tick();
     }
 
     println!(

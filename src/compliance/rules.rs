@@ -16,6 +16,7 @@ pub fn get_bpr(
     loop {
         attempts += 1;
         match make_github_request(
+            &bootstrap.client,
             &bootstrap.token,
             &format!(
                 "/repos/{}/{repo}/branches/{branch}/protection",
@@ -64,6 +65,7 @@ pub fn get_rules(
     loop {
         attempts += 1;
         match make_github_request(
+            &bootstrap.client,
             &bootstrap.token,
             &format!("/repos/{}/{repo}/rules/branches/{branch}", bootstrap.org),
             3,

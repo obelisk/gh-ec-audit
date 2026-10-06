@@ -6,6 +6,7 @@ use crate::{make_github_request, Bootstrap};
 
 fn get_default_branch(bootstrap: &Bootstrap, repo: impl Display) -> String {
     match make_github_request(
+        &bootstrap.client,
         &bootstrap.token,
         &format!("/repos/{}/{repo}", bootstrap.org),
         3,
@@ -31,6 +32,7 @@ fn get_default_branch(bootstrap: &Bootstrap, repo: impl Display) -> String {
 
 fn get_bprs(bootstrap: &Bootstrap, repo: impl Display, branch: impl Display) -> String {
     match make_github_request(
+        &bootstrap.client,
         &bootstrap.token,
         &format!(
             "/repos/{}/{repo}/branches/{branch}/protection",
@@ -58,6 +60,7 @@ fn get_bprs(bootstrap: &Bootstrap, repo: impl Display, branch: impl Display) -> 
 
 fn get_rulesets(bootstrap: &Bootstrap, repo: impl Display, branch: impl Display) -> String {
     match make_github_request(
+        &bootstrap.client,
         &bootstrap.token,
         &format!("/repos/{}/{repo}/rules/branches/{branch}", bootstrap.org),
         3,
@@ -76,14 +79,7 @@ fn get_rulesets(bootstrap: &Bootstrap, repo: impl Display, branch: impl Display)
 }
 
 pub fn run_audit(bootstrap: Bootstrap, repos: Option<Vec<String>>) {
-    let repos = repos.unwrap_or_else(|| {
-        bootstrap
-            .fetch_all_repositories(75, false)
-            .unwrap()
-            .into_iter()
-            .map(|r| r.name)
-            .collect::<Vec<String>>()
-    });
+    let repos = bootstrap.resolve_repos(repos);
 
     for repo in repos {
         let default_branch = get_default_branch(&bootstrap, &repo);

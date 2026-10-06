@@ -10,6 +10,7 @@ use crate::{
 /// Returns the repos that a team has access to
 fn get_team_repos(bootstrap: &Bootstrap, team: String) -> HashSet<Repository> {
     let team_repos: HashSet<Repository> = match make_paginated_github_request(
+        &bootstrap.client,
         &bootstrap.token,
         25,
         &format!("/orgs/{}/teams/{}/repos", bootstrap.org, team),
@@ -47,6 +48,7 @@ pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
 /// Get a list of all teams in the org
 pub fn get_org_teams(bootstrap: &Bootstrap) -> HashSet<Team> {
     match make_paginated_github_request(
+        &bootstrap.client,
         &bootstrap.token,
         25,
         &format!("/orgs/{}/teams", &bootstrap.org),
@@ -66,6 +68,7 @@ pub fn get_org_teams(bootstrap: &Bootstrap) -> HashSet<Team> {
 /// Get a list of all teams in the org, indexed by the team slug
 pub fn get_indexed_org_teams(bootstrap: &Bootstrap) -> HashMap<String, Team> {
     match make_paginated_github_request_with_index(
+        &bootstrap.client,
         &bootstrap.token,
         25,
         &format!("/orgs/{}/teams", &bootstrap.org),

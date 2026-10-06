@@ -10,7 +10,7 @@ pub fn find_codeowners_path(bootstrap: &Bootstrap, repo: &str) -> Option<String>
     const CO_LOCATIONS: [&str; 3] = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
     for location in CO_LOCATIONS {
         let url = format!("/repos/{}/{}/contents/{}", bootstrap.org, repo, location);
-        match make_github_request(&bootstrap.token, &url, 2, None) {
+        match make_github_request(&bootstrap.client, &bootstrap.token, &url, 2, None) {
             Ok(v) => {
                 if v.get("status").and_then(|s| s.as_str()) == Some("404") {
                     continue;
@@ -53,7 +53,7 @@ pub fn codeowners_exists_and_is_valid(
     repo: &str,
 ) -> Result<CodeownersStatus, Errors> {
     let url = format!("/repos/{}/{repo}/codeowners/errors", bootstrap.org);
-    match make_github_request(&bootstrap.token, &url, 3, None) {
+    match make_github_request(&bootstrap.client, &bootstrap.token, &url, 3, None) {
         Ok(res) => {
             if res.get("status").and_then(|v| v.as_str()) == Some("403") {
                 return Err(Errors::NoAccess403);

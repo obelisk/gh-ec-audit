@@ -10,11 +10,11 @@ const CO_LOCATIONS: [&str; 3] = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEO
 
 /// Search for a CO file in the possible locations and download the file, returning its content and HTML URL. Stop as soon as a matching file is found.  
 /// From GH docs: "If CODEOWNERS files exist in more than one of those locations, GitHub will search for them in that order and use the first one it finds.""
-fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> Result<Option<CodeownersFile>, String> {
+pub fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> Result<Option<CodeownersFile>, String> {
     for location in CO_LOCATIONS {
         // Try to download the file and fill in `content` and `html_url`
         let url = format!("/repos/{}/{}/contents/{}", bootstrap.org, repo, location);
-        let res = make_github_request(&bootstrap.token, &url, 3, None);
+        let res = make_github_request(&bootstrap.client, &bootstrap.token, &url, 3, None);
         match res {
             Err(_) => continue, // The call for this location failed, keep going
             Ok(v) => {
@@ -36,7 +36,7 @@ fn get_co_file(bootstrap: &Bootstrap, repo: &str) -> Result<Option<CodeownersFil
                 let html_url = v
                     .get("html_url")
                     .and_then(|u| u.as_str())
-                    .and_then(|s| Some(s.to_string()))
+                    .map(|s| s.to_string())
                     .unwrap_or("Not available".to_string());
                 if let Ok(content) = process_fetch_file_result(v) {
                     return Ok(Some(CodeownersFile::parse_from_content(
@@ -65,7 +65,7 @@ pub fn find_codeowners_in_org(
             .fetch_all_repositories(75, false)?
             .into_iter()
             .map(|r| r.name)
-            .collect::<Vec<String>>(),
+            .collect(),
     };
 
     let mut all_results = vec![];

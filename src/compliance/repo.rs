@@ -14,6 +14,7 @@ pub fn get_default_branch(
     loop {
         attempts += 1;
         match make_github_request(
+            &bootstrap.client,
             &bootstrap.token,
             &format!("/repos/{}/{repo}", bootstrap.org),
             3,
