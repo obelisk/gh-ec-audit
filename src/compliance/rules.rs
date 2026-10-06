@@ -2,12 +2,12 @@ use std::{thread, time::Duration};
 
 use crate::{
     compliance::{BprResponse, Errors, RulesetRule},
-    make_github_request, Bootstrap,
+    GitHubClient,
 };
 
 /// Get Branch Protection Rules for a repo's given branch
 pub fn get_bpr(
-    bootstrap: &Bootstrap,
+    client: &GitHubClient,
     repo: &str,
     branch: &str,
     max_attempts: u32,
@@ -15,13 +15,11 @@ pub fn get_bpr(
     let mut attempts = 0;
     loop {
         attempts += 1;
-        match make_github_request(
-            &bootstrap.token,
+        match client.get_json(
             &format!(
                 "/repos/{}/{repo}/branches/{branch}/protection",
-                bootstrap.org
+                client.org()
             ),
-            3,
             None,
         ) {
             Ok(res) => {
@@ -55,7 +53,7 @@ pub fn get_bpr(
 
 /// Get Rulesets for a repo's given branch
 pub fn get_rules(
-    bootstrap: &Bootstrap,
+    client: &GitHubClient,
     repo: &str,
     branch: &str,
     max_attempts: u32,
@@ -63,10 +61,8 @@ pub fn get_rules(
     let mut attempts = 0;
     loop {
         attempts += 1;
-        match make_github_request(
-            &bootstrap.token,
-            &format!("/repos/{}/{repo}/rules/branches/{branch}", bootstrap.org),
-            3,
+        match client.get_json(
+            &format!("/repos/{}/{repo}/rules/branches/{branch}", client.org()),
             None,
         ) {
             Ok(res) => {

@@ -11,7 +11,7 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use crate::compliance::utils::{check_csv_value_named, check_symbol};
-use crate::Bootstrap;
+use crate::GitHubClient;
 
 /// `Some(true)` means passing, `Some(false)` means failing, `None` means undetermined
 type Check = Option<bool>;
@@ -139,7 +139,7 @@ enum CodeownersStatus {
 }
 
 pub fn run_compliance_audit(
-    bootstrap: Bootstrap,
+    client: GitHubClient,
     repos: Option<Vec<String>>,
     csv_path: Option<String>,
     active_repo_only: bool,
@@ -165,8 +165,8 @@ pub fn run_compliance_audit(
     };
     // All the repositories we will check
     let repos = repos.unwrap_or_else(|| {
-        let mut list = bootstrap
-            .fetch_all_repositories(75, active_repo_only)
+        let mut list = client
+            .fetch_all_repositories(crate::constants::REPOS_PAGE_SIZE, active_repo_only)
             .unwrap()
             .into_iter()
             .filter(|r| !active_repo_only || (!r.archived && !r.disabled))
@@ -242,8 +242,7 @@ pub fn run_compliance_audit(
     for repo in repos {
         pb.set_message(repo.clone());
 
-        let (default_branch, visibility_opt) = match repo::get_default_branch(&bootstrap, &repo, 3)
-        {
+        let (default_branch, visibility_opt) = match repo::get_default_branch(&client, &repo, 3) {
             Ok(info) => (info.branch, info.visibility),
             Err(Errors::NoAccess403) => {
                 println!(
@@ -281,7 +280,7 @@ pub fn run_compliance_audit(
 
         if need_bpr {
             // 1) Classic BPR with retries on transient errors
-            let bpr_fetch = rules::get_bpr(&bootstrap, &repo, &default_branch, 3);
+            let bpr_fetch = rules::get_bpr(&client, &repo, &default_branch, 3);
 
             // Handle the OK case. Errors are handled separately
             if let Ok(ref bpr) = bpr_fetch {
@@ -333,7 +332,7 @@ pub fn run_compliance_audit(
             }
 
             // 2) New Rulesets with retries on transient errors
-            let rules_fetch = rules::get_rules(&bootstrap, &repo, &default_branch, 3);
+            let rules_fetch = rules::get_rules(&client, &repo, &default_branch, 3);
 
             // Handle the OK case. Errors are handled separately
             if let Ok(ref rules) = rules_fetch {
@@ -388,19 +387,16 @@ pub fn run_compliance_audit(
                             }
                         }
                         // The presence of this rule means the "require status checks" checkbox is ticked. Now we check the rule's params
-                        "required_status_checks" => {
-                            if is_selected("require_status_checks") {
-                                if let Some(params) = rule.parameters.as_ref() {
-                                    if params
-                                        .get("required_status_checks")
-                                        .and_then(|v| v.as_array())
-                                        .map(|a| !a.is_empty())
-                                        .unwrap_or(false)
-                                    {
-                                        checks.require_status_checks = Some(true);
-                                    }
-                                }
-                            }
+                        "required_status_checks"
+                            if is_selected("require_status_checks")
+                                && rule
+                                    .parameters
+                                    .as_ref()
+                                    .and_then(|params| params.get("required_status_checks"))
+                                    .and_then(|v| v.as_array())
+                                    .is_some_and(|a| !a.is_empty()) =>
+                        {
+                            checks.require_status_checks = Some(true);
                         }
                         _ => {}
                     }
@@ -430,7 +426,7 @@ pub fn run_compliance_audit(
 
         // 3) CODEOWNERS exists and is valid
         if is_selected("codeowners_valid") {
-            match utils::codeowners_exists_and_is_valid(&bootstrap, &repo) {
+            match utils::codeowners_exists_and_is_valid(&client, &repo) {
                 Ok(CodeownersStatus::Valid) => checks.codeowners_valid = Some(true),
                 Ok(CodeownersStatus::Invalid) | Ok(CodeownersStatus::Missing) => {}
                 Err(Errors::NoAccess403) => checks.codeowners_valid = None,
@@ -444,7 +440,7 @@ pub fn run_compliance_audit(
         // If CSV export is enabled, write a row; otherwise, print report
         if let Some(wtr) = csv_writer.as_mut() {
             let co_path = if is_selected("codeowners_valid") {
-                utils::find_codeowners_path(&bootstrap, &repo).unwrap_or_else(|| "".to_string())
+                utils::find_codeowners_path(&client, &repo).unwrap_or_default()
             } else {
                 "".to_string()
             };

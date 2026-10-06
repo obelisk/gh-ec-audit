@@ -4,11 +4,14 @@ use gh_ec_audit::compliance;
 use gh_ec_audit::deploy_key;
 use gh_ec_audit::external_collaborator;
 
-use clap::{command, Parser};
+use clap::Parser;
+use gh_ec_audit::alerts;
 use gh_ec_audit::codeowners;
 use gh_ec_audit::members;
+use gh_ec_audit::repos;
 use gh_ec_audit::teams;
-use gh_ec_audit::Bootstrap;
+use gh_ec_audit::uar;
+use gh_ec_audit::GitHubClient;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -79,6 +82,18 @@ struct Args {
     #[clap(long, default_value_t = false)]
     all: bool,
 
+    /// Audit the repos in the org
+    #[clap(long)]
+    org_repos: bool,
+
+    /// Perform a User Access Review
+    #[clap(long)]
+    uar: bool,
+
+    /// Export audit result in CSV format (only for specific audits)
+    #[clap(long)]
+    csv: bool,
+
     /// Use GH search API instead of enumerating repos (only for specific audits)
     #[clap(long, default_value_t = false)]
     search: bool,
@@ -95,12 +110,20 @@ struct Args {
     /// Increase verbosity
     #[arg(short, long)]
     verbose: bool,
+
+    /// Produce a zip archive with the result (only for specific audits)
+    #[arg(long)]
+    zip: Option<String>,
+
+    /// Report on identified alerts (Dependabot and Code Scanning) in repos
+    #[arg(long)]
+    alerts: bool,
 }
 
 fn main() {
     let args = Args::parse();
 
-    let bootstrap = match Bootstrap::new() {
+    let client = match GitHubClient::new() {
         Ok(b) => b,
         Err(e) => {
             println!("{}", e.bold().red());
@@ -109,26 +132,26 @@ fn main() {
     };
 
     if args.ec {
-        external_collaborator::run_audit(bootstrap, args.previous);
+        external_collaborator::run_audit(client, args.previous);
     } else if args.dk {
-        deploy_key::run_audit(bootstrap, args.previous, args.all);
+        deploy_key::run_audit(client, args.previous, args.all);
     } else if args.mem {
-        members::run_audit(bootstrap);
+        members::run_audit(client);
     } else if args.admin {
-        members::run_admin_audit(bootstrap, args.repos);
+        members::run_admin_audit(client, args.repos);
     } else if args.bpr {
-        bpr::run_audit(bootstrap, args.repos);
+        bpr::run_audit(client, args.repos, args.verbose);
     } else if args.teamperm {
         if let Some(team) = args.team {
-            teams::run_team_repo_audit(bootstrap, team);
+            teams::run_team_repo_audit(client, team);
         } else {
             println!("Please specify a team with --team");
         }
     } else if args.emptyteams {
-        teams::run_empty_teams_audit(bootstrap);
+        teams::run_empty_teams_audit(client);
     } else if args.codeowners {
         codeowners::run_codeowners_audit(
-            bootstrap,
+            client,
             args.repos,
             args.search,
             args.also_gh_api,
@@ -140,7 +163,7 @@ fn main() {
             .as_ref()
             .map(|v| v.iter().map(|s| s.to_string()).collect());
         compliance::run_compliance_audit(
-            bootstrap,
+            client,
             args.repos,
             args.comp_check_csv,
             args.active_repo_only,
@@ -148,10 +171,23 @@ fn main() {
         );
     } else if args.team_in_codeowners {
         if let Some(team) = args.team {
-            codeowners::run_team_in_codeowners_audit(bootstrap, team, args.repos, args.search);
+            codeowners::run_team_in_codeowners_audit(client, team, args.repos, args.search);
         } else {
             println!("Please specify a team with --team");
         }
+    } else if args.org_repos {
+        repos::run_repos_audit(client);
+    } else if args.uar {
+        if args.zip.is_some() && !args.csv {
+            panic!("You cannot produce a zip archive if you are not generating CSV files")
+        }
+        if let Some(repos) = args.repos {
+            uar::run_uar_audit(client, repos, args.csv, args.zip);
+        } else {
+            println!("Please specify a list of repos with --repos");
+        }
+    } else if args.alerts {
+        alerts::run_alerts_audit(client, args.repos, args.csv);
     } else {
         println!("No command specified");
     }

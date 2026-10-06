@@ -19,6 +19,10 @@ This CLI audits a GitHub organization across several areas (external collaborato
   - Teams referenced are not empty (warns if empty)
   Optionally also asks the GitHub API for CODEOWNERS parsing errors with `--also-gh-api`. Use `--verbose` to print successes.
 - **Team occurrences in CODEOWNERS (`--team-in-codeowners --team <slug>`)**: Finds where a team is referenced in CODEOWNERS across the org (useful before renames/removals).
+- **Repository protection compliance (`--comp-check`)**: Scores each repository's default-branch protection from 0 to 8, combining classic Branch Protection Rules and the newer Rulesets. Checks: PR requires one approval, dismiss stale reviews, require code-owner review, force-push disabled, deletion disabled, signed commits required, required status checks, and CODEOWNERS validity. Use `--comp-checks` to select a subset, `--active-repo-only` to skip archived/disabled repos, and `--comp-check-csv <FILE>` to export (appends and skips already-processed repos).
+- **Organization repositories audit (`--org-repos`)**: Summarizes repository counts by visibility/archived state and reports security features (secret scanning, push protection, Dependabot) that are not enabled on public repos.
+- **User Access Review (`--uar --repos <list>`)**: For each repo, uses its CODEOWNERS file when present (otherwise falls back to repo permissions) to build user/team access mappings. With `--csv`, writes `output/codeowners_uar.csv`, `output/traditional_uar.csv`, `output/teams_access.csv`, and `output/teams_membership.csv`; with `--zip <file>`, archives the output folder and prints its SHA256.
+- **Security alerts audit (`--alerts`)**: Counts open Dependabot and code-scanning alerts per repo by severity. With `--csv`, writes `output/alerts.csv`.
 
 ### Requirements
 
@@ -197,7 +201,28 @@ gh-ec-audit --team-in-codeowners --team platform-eng --search
 # Run any audit
 cargo run -- --codeowners --verbose
 
-# Format / lint as per your local setup
+# Format, lint and test
+cargo fmt
+cargo clippy --all-targets
+cargo test
 ```
 
+### Architecture
 
+The code is organized around a single HTTP client and a set of audit modules:
+
+- `src/github.rs` — `GitHubClient` owns the HTTP client, the token and the org. It
+  centralizes request headers, pagination, retries, GraphQL, and a set of endpoint
+  helpers (`org_members`, `org_teams`, `repo_collaborators`, `repo_teams`,
+  `repo_names`, ...). All audits go through it.
+- `src/constants.rs` — shared constants (API version, page sizes, retry counts,
+  CODEOWNERS locations).
+- `src/lib.rs` — domain models (`Permissions`, `Collaborator`, `Member`,
+  `Repository`, `Team`), the `GitHubIndex` trait, and small shared helpers
+  (`ProgressTracker`, `create_csv_writer`, `fetch_team_members`).
+- `src/<audit>.rs` and `src/<audit>/` — one module per audit, each exposing a
+  `run_*` entry point called from `main.rs`.
+
+Unit tests live next to the code they cover (`#[cfg(test)] mod tests`) and focus on
+pure logic (permission ranking, CODEOWNERS parsing, actor labelling, compliance
+check formatting, alert counting).

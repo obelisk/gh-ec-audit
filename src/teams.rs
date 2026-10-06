@@ -2,18 +2,13 @@ use std::collections::{HashMap, HashSet};
 
 use colored::Colorize;
 
-use crate::{
-    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap, Repository,
-    Team,
-};
+use crate::{GitHubClient, Repository, Team};
 
 /// Returns the repos that a team has access to
-fn get_team_repos(bootstrap: &Bootstrap, team: String) -> HashSet<Repository> {
-    let team_repos: HashSet<Repository> = match make_paginated_github_request(
-        &bootstrap.token,
-        25,
-        &format!("/orgs/{}/teams/{}/repos", bootstrap.org, team),
-        3,
+fn get_team_repos(client: &GitHubClient, team: String) -> HashSet<Repository> {
+    let team_repos: HashSet<Repository> = match client.get_paginated(
+        &format!("/orgs/{}/teams/{}/repos", client.org(), team),
+        crate::constants::DEFAULT_PAGE_SIZE,
         None,
     ) {
         Ok(t) => t,
@@ -29,8 +24,8 @@ fn get_team_repos(bootstrap: &Bootstrap, team: String) -> HashSet<Repository> {
 }
 
 /// Fetch all the repos for a given team and the permission it confers
-pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
-    let team_repos = get_team_repos(&bootstrap, team);
+pub fn run_team_repo_audit(client: GitHubClient, team: String) {
+    let team_repos = get_team_repos(&client, team);
 
     println!(
         "{} {} {}",
@@ -45,14 +40,8 @@ pub fn run_team_repo_audit(bootstrap: Bootstrap, team: String) {
 }
 
 /// Get a list of all teams in the org
-pub fn get_org_teams(bootstrap: &Bootstrap) -> HashSet<Team> {
-    match make_paginated_github_request(
-        &bootstrap.token,
-        25,
-        &format!("/orgs/{}/teams", &bootstrap.org),
-        3,
-        None,
-    ) {
+pub fn get_org_teams(client: &GitHubClient) -> HashSet<Team> {
+    match client.org_teams_set() {
         Ok(t) => t,
         Err(e) => {
             panic!(
@@ -64,14 +53,8 @@ pub fn get_org_teams(bootstrap: &Bootstrap) -> HashSet<Team> {
 }
 
 /// Get a list of all teams in the org, indexed by the team slug
-pub fn get_indexed_org_teams(bootstrap: &Bootstrap) -> HashMap<String, Team> {
-    match make_paginated_github_request_with_index(
-        &bootstrap.token,
-        25,
-        &format!("/orgs/{}/teams", &bootstrap.org),
-        3,
-        None,
-    ) {
+pub fn get_indexed_org_teams(client: &GitHubClient) -> HashMap<String, Team> {
+    match client.org_teams() {
         Ok(t) => t,
         Err(e) => {
             panic!(
@@ -83,12 +66,12 @@ pub fn get_indexed_org_teams(bootstrap: &Bootstrap) -> HashMap<String, Team> {
 }
 
 /// Fetch all empty teams, i.e., teams with no members
-pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
+pub fn run_empty_teams_audit(client: GitHubClient) {
     println!(
         "{}",
         "I am going to fetch all teams from the org...".yellow()
     );
-    let teams = get_org_teams(&bootstrap);
+    let teams = get_org_teams(&client);
 
     println!(
         "{} {} {}",
@@ -100,24 +83,31 @@ pub fn run_empty_teams_audit(bootstrap: Bootstrap) {
 
     // For each team, see if it's empty.
     for team in teams {
-        if let Ok(true) = team.is_empty(&bootstrap) {
-            // The team is empty: we want to see to how many repos it has access
-            let team_repos = get_team_repos(&bootstrap, team.slug);
-            println!(
-                "{}: {}. {} {} {}",
-                "Found an empty GH team".yellow(),
-                team.name.white(),
-                "This team has access to".yellow(),
-                team_repos.len().to_string().white(),
-                "repositories".yellow()
-            );
-        } else {
-            println!(
-                "{} {} {}",
-                "Warning! I could not determine if team".yellow(),
-                team.slug.white(),
-                "is empty. I will continue with other teams.".yellow()
-            );
+        match team.is_empty(&client) {
+            Ok(true) => {
+                // The team is empty: we want to see to how many repos it has access
+                let team_repos = get_team_repos(&client, team.slug);
+                println!(
+                    "{}: {}. {} {} {}",
+                    "Found an empty GH team".yellow(),
+                    team.name.white(),
+                    "This team has access to".yellow(),
+                    team_repos.len().to_string().white(),
+                    "repositories".yellow()
+                );
+            }
+            Ok(false) => {
+                // The team is not empty: nothing to report
+            }
+            Err(e) => {
+                println!(
+                    "{} {} {} {}",
+                    "Warning! I could not determine if team".yellow(),
+                    team.slug.white(),
+                    "is empty. I will continue with other teams. Error:".yellow(),
+                    e.white()
+                );
+            }
         }
     }
 }

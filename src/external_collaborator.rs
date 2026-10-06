@@ -5,10 +5,7 @@ use std::{
 
 use colored::Colorize;
 
-use crate::{
-    get_repo_collaborators, make_paginated_github_request_with_index, Bootstrap, GitHubIndex,
-    Repository,
-};
+use crate::{GitHubClient, ProgressTracker, Repository};
 
 pub type ExternalCollaboratorPermissions =
     HashMap<(String, String), ExternalCollaboratorPermission>;
@@ -18,7 +15,7 @@ pub struct OutsideCollaborator {
     login: String,
 }
 
-impl GitHubIndex for OutsideCollaborator {
+impl crate::GitHubIndex for OutsideCollaborator {
     fn index(&self) -> String {
         self.login.clone()
     }
@@ -57,7 +54,6 @@ fn parse_previous_run_csv(file: impl AsRef<Path>) -> ExternalCollaboratorPermiss
     let mut reader = csv::Reader::from_path(file).unwrap();
     reader
         .deserialize()
-        .into_iter()
         .filter_map(|x: Result<ExternalCollaboratorPermission, _>| {
             if let Ok(x) = x {
                 Some(((x.login.clone(), x.repository.clone()), x))
@@ -77,7 +73,7 @@ fn generate_csv(ec_permissions: ExternalCollaboratorPermissions) -> String {
     String::from_utf8(writer.into_inner().unwrap()).unwrap()
 }
 
-pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
+pub fn run_audit(client: GitHubClient, previous_csv: Option<String>) {
     println!("{}", "GitHub External Collaborator Audit".white().bold());
 
     let previous_ec_permissions = match previous_csv {
@@ -110,22 +106,20 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         "I'm going to fetch all external collaborators from the org".yellow(),
     );
 
-    let outside_collaborators: HashMap<String, OutsideCollaborator> =
-        match make_paginated_github_request_with_index(
-            &bootstrap.token,
-            100,
-            &format!("/orgs/{}/outside_collaborators", &bootstrap.org),
-            3,
+    let outside_collaborators: HashMap<String, OutsideCollaborator> = match client
+        .get_paginated_indexed(
+            &format!("/orgs/{}/outside_collaborators", client.org()),
+            crate::constants::MEMBERS_PAGE_SIZE,
             None,
         ) {
-            Ok(outside_collaborators) => outside_collaborators,
-            Err(e) => {
-                panic!(
-                    "{}: {e}",
-                    "I couldn't fetch the outside collaborators".red()
-                );
-            }
-        };
+        Ok(outside_collaborators) => outside_collaborators,
+        Err(e) => {
+            panic!(
+                "{}: {e}",
+                "I couldn't fetch the outside collaborators".red()
+            );
+        }
+    };
 
     println!(
         "{} {}",
@@ -138,18 +132,19 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         "Alright! Now I need to fetch all repositories so I can check for their access.".yellow()
     );
 
-    let repositories: HashSet<Repository> = bootstrap.fetch_all_repositories(75, false).unwrap();
+    let repositories: HashSet<Repository> = client
+        .fetch_all_repositories(crate::constants::REPOS_PAGE_SIZE, false)
+        .unwrap();
 
     println!("{}", "Finally the big one, I'm going to check each repository one by one to find external collaborators and their access. This is going to take a while...".yellow());
 
-    let one_percent = (repositories.len() as f64 * 0.01).ceil() as usize;
-    let mut progress = 0;
+    let mut tracker = ProgressTracker::new(repositories.len());
     let mut never_seen_outside_collaborators = outside_collaborators.clone();
 
     let mut ec_permissions = ExternalCollaboratorPermissions::new();
 
     for repository in repositories {
-        let collaborators = match get_repo_collaborators(&bootstrap, &repository.name) {
+        let collaborators = match client.repo_collaborators(&repository.name) {
             Ok(c) => c,
             Err(_) => {
                 println!(
@@ -163,52 +158,49 @@ pub fn run_audit(bootstrap: Bootstrap, previous_csv: Option<String>) {
         };
 
         for collaborator in collaborators {
-            if outside_collaborators.contains_key(&collaborator.login) {
+            if outside_collaborators.contains_key(collaborator.login()) {
                 match previous_ec_permissions
-                    .get(&(collaborator.login.clone(), repository.name.clone()))
+                    .get(&(collaborator.login().to_string(), repository.name.clone()))
                 {
                     Some(ec_perm) => {
-                        if ec_perm.access != collaborator.permissions.highest_perm() {
+                        if ec_perm.access != collaborator.permissions().highest_perm() {
                             println!(
                                 "{}: {} {} {}",
                                 "I found a change in access so clearing approvals for".yellow(),
-                                collaborator.login.white(),
+                                collaborator.login().white(),
                                 "in".yellow(),
                                 repository.name.white(),
                             );
                             ec_permissions.insert(
-                                (collaborator.login.clone(), repository.name.clone()),
+                                (collaborator.login().to_string(), repository.name.clone()),
                                 ExternalCollaboratorPermission::new(
-                                    collaborator.login.clone(),
+                                    collaborator.login().to_string(),
                                     repository.name.clone(),
-                                    collaborator.permissions.highest_perm(),
+                                    collaborator.permissions().highest_perm(),
                                 ),
                             );
                         } else {
                             ec_permissions.insert(
-                                (collaborator.login.clone(), repository.name.clone()),
+                                (collaborator.login().to_string(), repository.name.clone()),
                                 ec_perm.clone(),
                             );
                         }
                     }
                     None => {
                         ec_permissions.insert(
-                            (collaborator.login.clone(), repository.name.clone()),
+                            (collaborator.login().to_string(), repository.name.clone()),
                             ExternalCollaboratorPermission::new(
-                                collaborator.login.clone(),
+                                collaborator.login().to_string(),
                                 repository.name.clone(),
-                                collaborator.permissions.highest_perm(),
+                                collaborator.permissions().highest_perm(),
                             ),
                         );
                     }
                 };
-                never_seen_outside_collaborators.remove(&collaborator.login);
+                never_seen_outside_collaborators.remove(collaborator.login());
             }
         }
-        progress += 1;
-        if progress % one_percent == 0 {
-            println!("Processed {} reposistories", progress.to_string().blue());
-        }
+        tracker.tick();
     }
 
     println!(

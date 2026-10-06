@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{make_github_request, Bootstrap, Member, Team};
+use crate::{GitHubClient, Member, Team};
 
 use super::{CodeownersFile, CodeownersFileProblem};
 use colored::Colorize;
 
 /// Run the audit on a given list of CO files
 pub fn audit_co_files(
-    bootstrap: &Bootstrap,
+    client: &GitHubClient,
     codeowners_files: &[CodeownersFile],
     org_members: &HashMap<String, Member>,
     org_teams: &HashMap<String, Team>,
@@ -61,40 +61,47 @@ pub fn audit_co_files(
                 .filter_map(|team| {
                     // Check if the team is empty, by first looking into the cache: if
                     // it's not there, we call the GH API and update the cache accordingly.
-                    // Note - the || operator short-circuits, so we are making the call to GH API
-                    // only if the team is not in our cache.
                     match org_teams.get(team) {
                         Some(t) => {
-                            if empty_teams.contains(&t.slug) || {
-                                match t.is_empty(bootstrap) {
-                                    Ok(empty) => empty,
-                                    Err(e) => {
-                                        // For some reason, we could not establish if the team is empty. Log a warning and return false (i.e., not empty),
-                                        // which is equivalent to ignoring it (because we are not alerting on non-empty teams).
-                                        // This should anyway be a very rare circumstance.
-                                        println!(
-                                            "{} {} {} {}",
-                                            "Warning! I could not determine if team".yellow(),
-                                            t.slug.white(),
-                                            "is empty. I am going to ignore it. The error was"
-                                                .yellow(),
-                                            e.white()
-                                        );
-                                        false
-                                    }
-                                }
-                            } {
-                                // The team is empty
-                                empty_teams.insert(t.slug.clone());
-                                Some(CodeownersFileProblem::EmptyTeam {
+                            // If we already know the team is non-empty, skip the API call.
+                            if non_empty_teams.contains(&t.slug) {
+                                return None;
+                            }
+                            // If we already know the team is empty, report it again.
+                            if empty_teams.contains(&t.slug) {
+                                return Some(CodeownersFileProblem::EmptyTeam {
                                     team: team.to_string(),
                                     co_file_url: co_file.url.clone(),
-                                })
-                            } else {
-                                // The team is not empty. Let's insert it into the non-empty cache (repeated
-                                // insertions don't matter because it's a HashSet).
-                                non_empty_teams.insert(t.slug.clone());
-                                None
+                                });
+                            }
+                            match t.is_empty(client) {
+                                Ok(true) => {
+                                    // The team is empty
+                                    empty_teams.insert(t.slug.clone());
+                                    Some(CodeownersFileProblem::EmptyTeam {
+                                        team: team.to_string(),
+                                        co_file_url: co_file.url.clone(),
+                                    })
+                                }
+                                Ok(false) => {
+                                    // The team is not empty. Let's insert it into the non-empty cache (repeated
+                                    // insertions don't matter because it's a HashSet).
+                                    non_empty_teams.insert(t.slug.clone());
+                                    None
+                                }
+                                Err(e) => {
+                                    // For some reason, we could not establish if the team is empty. Log a warning and return false (i.e., not empty),
+                                    // which is equivalent to ignoring it (because we are not alerting on non-empty teams).
+                                    // This should anyway be a very rare circumstance.
+                                    println!(
+                                        "{} {} {} {}",
+                                        "Warning! I could not determine if team".yellow(),
+                                        t.slug.white(),
+                                        "is empty. I am going to ignore it. The error was".yellow(),
+                                        e.white()
+                                    );
+                                    None
+                                }
                             }
                         }
                         None => {
@@ -126,16 +133,16 @@ pub fn audit_co_files(
         // If we were told to also use the GH API, we do it here
         if also_gh_api {
             println!("This is what the GitHub API has to say about this CODEOWNERS file...");
-            audit_co_files_with_gh_api(bootstrap, &co_file.repo);
+            audit_co_files_with_gh_api(client, &co_file.repo);
         }
     }
 }
 
 /// Audit CODEOWNERS files for errors by asking the GH REST API.  
 /// For more info, see https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-codeowners-errors
-fn audit_co_files_with_gh_api(bootstrap: &Bootstrap, repo: &str) {
+fn audit_co_files_with_gh_api(client: &GitHubClient, repo: &str) {
     // Call the GH API
-    match get_codeowners_errors(&bootstrap, &repo) {
+    match get_codeowners_errors(client, repo) {
         Ok(Some(kinds)) => {
             // A CODEOWNERS file was found and a (possibly empty) Vec of errors was returned
             if kinds.is_empty() {
@@ -175,13 +182,13 @@ fn audit_co_files_with_gh_api(bootstrap: &Bootstrap, repo: &str) {
 }
 
 /// Call the GH API and retrieve errors detected in the CODEOWNERS file.
-fn get_codeowners_errors(bootstrap: &Bootstrap, repo: &str) -> Result<Option<Vec<String>>, String> {
-    let url = format!("/repos/{}/{repo}/codeowners/errors", bootstrap.org);
-    let res = make_github_request(&bootstrap.token, &url, 3, None)?;
+fn get_codeowners_errors(client: &GitHubClient, repo: &str) -> Result<Option<Vec<String>>, String> {
+    let url = format!("/repos/{}/{repo}/codeowners/errors", client.org());
+    let res = client.get_json(&url, None)?;
     match res.get("errors") {
         None => {
             // If this field is not present, it means a CO file has not been found
-            return Ok(None);
+            Ok(None)
         }
         Some(errors) => {
             let kinds: Vec<String> = errors
@@ -191,7 +198,7 @@ fn get_codeowners_errors(bootstrap: &Bootstrap, repo: &str) -> Result<Option<Vec
                 .map(|e| {
                     e.get("kind")
                         .and_then(|k| k.as_str())
-                        .and_then(|s| Some(s.to_string()))
+                        .map(|s| s.to_string())
                         .unwrap_or("Unknown".to_string())
                 })
                 .collect();

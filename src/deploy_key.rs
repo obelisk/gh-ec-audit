@@ -2,10 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use colored::Colorize;
 
-use crate::{
-    make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap, Member,
-    Repository,
-};
+use crate::constants::{MEMBERS_PAGE_SIZE, REPOS_PAGE_SIZE};
+use crate::{GitHubClient, Member, ProgressTracker, Repository};
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
 struct DeployKey {
@@ -21,17 +19,11 @@ struct DeployKey {
     enabled: bool,
 }
 
-pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool) {
+pub fn run_audit(client: GitHubClient, _previous_csv: Option<String>, all: bool) {
     println!("{}", "GitHub Deploy Key Audit".white().bold());
 
     println!("{}", "Fetching all organization members".yellow());
-    let members: HashMap<String, Member> = match make_paginated_github_request_with_index(
-        &bootstrap.token,
-        75,
-        &format!("/orgs/{}/members", &bootstrap.org),
-        3,
-        None,
-    ) {
+    let members: HashMap<String, Member> = match client.org_members(None) {
         Ok(members) => members,
         Err(e) => {
             panic!(
@@ -44,19 +36,18 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool)
 
     println!("{} {}", "Success! I found: ".green(), members.len());
 
-    let repositories: HashSet<Repository> = bootstrap.fetch_all_repositories(75, false).unwrap();
+    let repositories: HashSet<Repository> = client
+        .fetch_all_repositories(REPOS_PAGE_SIZE, false)
+        .unwrap();
 
     println!("{}", "Finally the big one, I'm going to check each repository one by one to find deploy keys and their access. This is going to take a while...".yellow());
 
-    let one_percent = (repositories.len() as f64 * 0.01).ceil() as usize;
-    let mut progress = 0;
+    let mut tracker = ProgressTracker::new(repositories.len());
 
     for repository in repositories {
-        let deploy_keys: HashSet<DeployKey> = match make_paginated_github_request(
-            &bootstrap.token,
-            25,
-            &format!("/repos/{}/{}/keys", &bootstrap.org, repository.name),
-            3,
+        let deploy_keys: HashSet<DeployKey> = match client.get_paginated(
+            &format!("/repos/{}/{}/keys", client.org(), repository.name),
+            MEMBERS_PAGE_SIZE,
             None,
         ) {
             Ok(dks) => dks,
@@ -99,21 +90,8 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool)
                 // this deploy key
                 (false, true) => (),
             }
-
-            if !members.contains_key(&deploy_key.added_by) {
-                println!(
-                    "{} has deploy key {} {}: {}",
-                    repository.name.white(),
-                    deploy_key.title.yellow(),
-                    "added by a non-member".red(),
-                    deploy_key.added_by.white()
-                );
-            }
         }
 
-        progress += 1;
-        if progress % one_percent == 0 {
-            println!("Processed {} reposistories", progress.to_string().blue());
-        }
+        tracker.tick();
     }
 }

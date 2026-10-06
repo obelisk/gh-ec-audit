@@ -2,15 +2,15 @@ use std::collections::HashSet;
 
 use crate::{
     compliance::{Check, CodeownersStatus, Errors},
-    make_github_request, Bootstrap,
+    constants::CO_LOCATIONS,
+    GitHubClient,
 };
 
 // Try the common CODEOWNERS locations and return the repository-relative path if found
-pub fn find_codeowners_path(bootstrap: &Bootstrap, repo: &str) -> Option<String> {
-    const CO_LOCATIONS: [&str; 3] = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
+pub fn find_codeowners_path(client: &GitHubClient, repo: &str) -> Option<String> {
     for location in CO_LOCATIONS {
-        let url = format!("/repos/{}/{}/contents/{}", bootstrap.org, repo, location);
-        match make_github_request(&bootstrap.token, &url, 2, None) {
+        let url = format!("/repos/{}/{}/contents/{}", client.org(), repo, location);
+        match client.get_json(&url, None) {
             Ok(v) => {
                 if v.get("status").and_then(|s| s.as_str()) == Some("404") {
                     continue;
@@ -37,11 +37,9 @@ pub fn read_existing_csv_repos(path: &str) -> HashSet<String> {
         Err(_) => return set,
     };
     let repo_idx = headers.iter().position(|h| h == "repository").unwrap_or(0);
-    for result in rdr.records() {
-        if let Ok(record) = result {
-            if let Some(repo) = record.get(repo_idx) {
-                set.insert(repo.to_string());
-            }
+    for record in rdr.records().flatten() {
+        if let Some(repo) = record.get(repo_idx) {
+            set.insert(repo.to_string());
         }
     }
     set
@@ -49,11 +47,11 @@ pub fn read_existing_csv_repos(path: &str) -> HashSet<String> {
 
 /// Check CODEOWNERS state via GitHub API
 pub fn codeowners_exists_and_is_valid(
-    bootstrap: &Bootstrap,
+    client: &GitHubClient,
     repo: &str,
 ) -> Result<CodeownersStatus, Errors> {
-    let url = format!("/repos/{}/{repo}/codeowners/errors", bootstrap.org);
-    match make_github_request(&bootstrap.token, &url, 3, None) {
+    let url = format!("/repos/{}/{repo}/codeowners/errors", client.org());
+    match client.get_json(&url, None) {
         Ok(res) => {
             if res.get("status").and_then(|v| v.as_str()) == Some("403") {
                 return Err(Errors::NoAccess403);
@@ -96,5 +94,42 @@ pub fn check_csv_value_named(v: Check, name: &str, selected: Option<&HashSet<Str
             }
             check_csv_value(v)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_symbol_maps_states() {
+        assert_eq!(check_symbol(Some(true)), "✅");
+        assert_eq!(check_symbol(Some(false)), "❌");
+        assert_eq!(check_symbol(None), "? (403)");
+    }
+
+    #[test]
+    fn check_csv_value_maps_states() {
+        assert_eq!(check_csv_value(Some(true)), "pass");
+        assert_eq!(check_csv_value(Some(false)), "fail");
+        assert_eq!(check_csv_value(None), "403");
+    }
+
+    #[test]
+    fn check_csv_value_named_returns_na_when_not_selected() {
+        let selected: HashSet<String> = ["pr_one_approval".to_string()].into_iter().collect();
+        assert_eq!(
+            check_csv_value_named(Some(true), "pr_one_approval", Some(&selected)),
+            "pass"
+        );
+        assert_eq!(
+            check_csv_value_named(Some(true), "disable_deletion", Some(&selected)),
+            "n/a"
+        );
+    }
+
+    #[test]
+    fn check_csv_value_named_uses_value_when_no_selection() {
+        assert_eq!(check_csv_value_named(Some(false), "anything", None), "fail");
     }
 }
