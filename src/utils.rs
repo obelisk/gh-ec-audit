@@ -5,7 +5,7 @@ use serde_json::Value;
 /// Retrieve the content of a GH file
 pub fn fetch_file_content(bootstrap: &Bootstrap, url: &str) -> Result<String, String> {
     let url = url.trim_start_matches("https://api.github.com");
-    let res = make_github_request(&bootstrap.token, url, 3, None).unwrap();
+    let res = make_github_request(&bootstrap.client, &bootstrap.token, url, 3, None).unwrap();
     process_fetch_file_result(res)
 }
 
@@ -27,7 +27,7 @@ pub fn process_fetch_file_result(res: Value) -> Result<String, String> {
     let content = res
         .get("content")
         .and_then(|v| v.as_str())
-        .and_then(|s| Some(s.trim().replace("\n", "")));
+        .map(|s| s.trim().replace("\n", ""));
 
     if let Some(content) = content {
         // base64-decode the content and return the string

@@ -16,11 +16,11 @@ pub fn find_codeowners_in_org(bootstrap: &Bootstrap) -> Result<Vec<CodeownersFil
         // !!! NOTE - This endpoint has a custom rate limitation !!!
         // https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#rate-limit
         let address = format!("/search/code?q={query}&per_page=100&page={page}");
-        let res = make_github_request(&bootstrap.token, &address, 3, None)?;
+        let res = make_github_request(&bootstrap.client, &bootstrap.token, &address, 3, None)?;
         let items = res
             .get("items")
             .and_then(|i| i.as_array())
-            .and_then(|a| Some(a.clone()))
+            .cloned()
             .unwrap_or_default();
         if items.is_empty() {
             // We are past the last page
@@ -75,11 +75,12 @@ pub fn find_team_in_codeowners(bootstrap: &Bootstrap, team: String) {
         // !!! NOTE - This endpoint has a custom rate limitation !!!
         // https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#rate-limit
         let address = format!("/search/code?q={query}&per_page=100&page={page}");
-        let res = make_github_request(&bootstrap.token, &address, 3, None).unwrap();
+        let res =
+            make_github_request(&bootstrap.client, &bootstrap.token, &address, 3, None).unwrap();
         let items = res
             .get("items")
             .and_then(|i| i.as_array())
-            .and_then(|a| Some(a.clone()))
+            .cloned()
             .unwrap_or_default();
         if items.is_empty() {
             break;

@@ -177,7 +177,7 @@ fn audit_co_files_with_gh_api(bootstrap: &Bootstrap, repo: &str) {
 /// Call the GH API and retrieve errors detected in the CODEOWNERS file.
 fn get_codeowners_errors(bootstrap: &Bootstrap, repo: &str) -> Result<Option<Vec<String>>, String> {
     let url = format!("/repos/{}/{repo}/codeowners/errors", bootstrap.org);
-    let res = make_github_request(&bootstrap.token, &url, 3, None)?;
+    let res = make_github_request(&bootstrap.client, &bootstrap.token, &url, 3, None)?;
     match res.get("errors") {
         None => {
             // If this field is not present, it means a CO file has not been found
@@ -191,7 +191,7 @@ fn get_codeowners_errors(bootstrap: &Bootstrap, repo: &str) -> Result<Option<Vec
                 .map(|e| {
                     e.get("kind")
                         .and_then(|k| k.as_str())
-                        .and_then(|s| Some(s.to_string()))
+                        .map(|s| s.to_string())
                         .unwrap_or("Unknown".to_string())
                 })
                 .collect();

@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::{
     make_paginated_github_request, make_paginated_github_request_with_index, Bootstrap, Member,
-    Repository,
+    ProgressTracker, Repository,
 };
 
 #[derive(Debug, serde::Deserialize, Hash, Eq, PartialEq)]
@@ -26,6 +26,7 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool)
 
     println!("{}", "Fetching all organization members".yellow());
     let members: HashMap<String, Member> = match make_paginated_github_request_with_index(
+        &bootstrap.client,
         &bootstrap.token,
         75,
         &format!("/orgs/{}/members", &bootstrap.org),
@@ -48,11 +49,11 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool)
 
     println!("{}", "Finally the big one, I'm going to check each repository one by one to find deploy keys and their access. This is going to take a while...".yellow());
 
-    let one_percent = (repositories.len() as f64 * 0.01).ceil() as usize;
-    let mut progress = 0;
+    let mut tracker = ProgressTracker::new(repositories.len());
 
     for repository in repositories {
         let deploy_keys: HashSet<DeployKey> = match make_paginated_github_request(
+            &bootstrap.client,
             &bootstrap.token,
             25,
             &format!("/repos/{}/{}/keys", &bootstrap.org, repository.name),
@@ -99,21 +100,8 @@ pub fn run_audit(bootstrap: Bootstrap, _previous_csv: Option<String>, all: bool)
                 // this deploy key
                 (false, true) => (),
             }
-
-            if !members.contains_key(&deploy_key.added_by) {
-                println!(
-                    "{} has deploy key {} {}: {}",
-                    repository.name.white(),
-                    deploy_key.title.yellow(),
-                    "added by a non-member".red(),
-                    deploy_key.added_by.white()
-                );
-            }
         }
 
-        progress += 1;
-        if progress % one_percent == 0 {
-            println!("Processed {} reposistories", progress.to_string().blue());
-        }
+        tracker.tick();
     }
 }
